@@ -23,8 +23,9 @@ it.each([
   async (_, fileName, open) => {
     const dir = mkdtempSync(join(tmpdir(), 'orca-orphaned-temp-'))
     dirs.push(dir)
-    const orphaned = join(dir, `${fileName}.4242.1784108697605.b306bb91.tmp`)
-    const recent = join(dir, `${fileName}.4343.${Date.now()}.cafef00d.tmp`)
+    // Other-process PIDs: the sweep always spares this process's own temps.
+    const orphaned = join(dir, `${fileName}.${process.pid + 1}.1784108697605.b306bb91.tmp`)
+    const recent = join(dir, `${fileName}.${process.pid + 2}.${Date.now()}.cafef00d.tmp`)
     writeFileSync(orphaned, '[]')
     writeFileSync(recent, '[]')
     const twoDaysAgo = (Date.now() - 2 * 86400_000) / 1000
