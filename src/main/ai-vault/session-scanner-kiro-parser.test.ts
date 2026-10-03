@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseKiroSessionFile } from './session-scanner-kiro-parser'
 import { isKiroSessionManifestPath } from './session-scanner-kiro-paths'
@@ -115,6 +115,21 @@ describe('parseKiroSessionFile', () => {
     expect(session?.resumeCommand).toBe(
       `cd '/private/tmp/kiro-test-proj' && kiro-cli chat --tui --resume-id '${SESSION_ID}'`
     )
+  })
+
+  it('surfaces an unreadable manifest instead of answering "no session"', async () => {
+    const { file } = await writeKiroSession({})
+    await rm(file.path)
+    await mkdir(file.path)
+
+    await expect(parseKiroSessionFile(file, 'darwin')).rejects.toThrow()
+  })
+
+  it('surfaces an unreadable transcript instead of listing a partial session', async () => {
+    const { file } = await writeKiroSession({ messageLines: null })
+    await mkdir(join(dirname(file.path), 'messages.jsonl'))
+
+    await expect(parseKiroSessionFile(file, 'darwin')).rejects.toThrow()
   })
 
   it('still lists a session that has no transcript yet', async () => {

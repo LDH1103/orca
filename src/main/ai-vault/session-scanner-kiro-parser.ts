@@ -1,8 +1,8 @@
 import { openTranscriptReadStream, wslGatedReadFile } from '../native-chat/wsl-transcript-fs-access'
-import { WslTranscriptFsError } from '../native-chat/wsl-transcript-fs-gate'
 import { basename, dirname } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { AiVaultSession } from '../../shared/ai-vault-types'
+import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import {
   addPreviewContent,
   addPreviewMessage,
@@ -29,15 +29,22 @@ export async function parseKiroSessionFile(
   platform: NodeJS.Platform = process.platform,
   messages?: TranscriptMessageSink
 ): Promise<AiVaultSession | null> {
+  let manifestText: string
+  try {
+    manifestText = await wslGatedReadFile(file.path, 'utf-8', 'scan')
+  } catch (error) {
+    // Why: only a manifest that is gone is "no session". A gate refusal or a transient read error
+    // (a Windows sharing violation while Kiro rewrites the file) must surface as a scan issue, or
+    // the parse cache keeps the missing row under the file's unchanged mtime and never retries.
+    if (isDefinitiveAbsence(error)) {
+      return null
+    }
+    throw error
+  }
   let manifest: Record<string, unknown> | null
   try {
-    manifest = asRecord(JSON.parse(await wslGatedReadFile(file.path, 'utf-8', 'scan')) as unknown)
-  } catch (error) {
-    // Why: a gate refusal is not "no session" — returning null would let the parse cache keep
-    // that degraded answer under the file's unchanged mtime and never retry.
-    if (error instanceof WslTranscriptFsError) {
-      throw error
-    }
+    manifest = asRecord(JSON.parse(manifestText) as unknown)
+  } catch {
     return null
   }
   if (!manifest) {
@@ -91,9 +98,9 @@ async function consumeKiroTranscript(
       }
     }
   } catch (error) {
-    // No transcript yet (a session opened but never prompted) still belongs in the panel; a gate
-    // refusal means the bytes exist but are unreachable, so a partial session must not be cached.
-    if (error instanceof WslTranscriptFsError) {
+    // No transcript yet (a session opened but never prompted) still belongs in the panel; any other
+    // failure means the bytes exist but were unreadable, so a partial session must not be cached.
+    if (!isDefinitiveAbsence(error)) {
       throw error
     }
   } finally {
