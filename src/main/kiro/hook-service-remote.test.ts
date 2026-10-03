@@ -37,4 +37,18 @@ describe('KiroHookService.installRemote', () => {
       }
     }
   })
+
+  it('refuses to overwrite a remote same-named file that holds hooks Orca did not write', async () => {
+    const userFile = JSON.stringify({
+      version: 'v1',
+      hooks: [{ name: 'mine', trigger: 'Stop', action: { type: 'command', command: 'notify.sh' } }]
+    })
+    const { sftp, fs } = createAgentHookMemorySftp({
+      '/home/dev/.kiro/hooks/orca-agent-status.json': userFile
+    })
+
+    const status = await new KiroHookService().installRemote(sftp, '/home/dev')
+    expect(status).toMatchObject({ agent: 'kiro', state: 'error' })
+    expect(fs.files.get('/home/dev/.kiro/hooks/orca-agent-status.json')).toBe(userFile)
+  })
 })

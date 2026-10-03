@@ -107,6 +107,60 @@ describe('KiroHookService', () => {
     expect(status).toMatchObject({ state: 'not_installed', managedHooksPresent: false })
   })
 
+  it('counts only entries Kiro would run: disabled entries and non-v1 files are not installed', () => {
+    kiroHookService.install()
+    const file = readHooksFile()
+    writeHooksFile(
+      JSON.stringify({
+        ...file,
+        hooks: file.hooks?.map((entry) =>
+          entry.trigger === 'Stop' ? { ...entry, enabled: false } : entry
+        )
+      })
+    )
+    expect(kiroHookService.getStatus()).toMatchObject({ state: 'partial', detail: 'events: Stop' })
+
+    writeHooksFile(JSON.stringify({ ...file, version: 'v2' }))
+    expect(kiroHookService.getStatus()).toMatchObject({
+      state: 'partial',
+      managedHooksPresent: true
+    })
+  })
+
+  it('refuses to overwrite a same-named file that holds hooks Orca did not write', () => {
+    const userFile = JSON.stringify({
+      version: 'v1',
+      hooks: [{ name: 'mine', trigger: 'Stop', action: { type: 'command', command: 'notify.sh' } }]
+    })
+    writeHooksFile(userFile)
+
+    expect(kiroHookService.install()).toMatchObject({ state: 'error' })
+    expect(readFileSync(getKiroHooksFilePath(), 'utf-8')).toBe(userFile)
+  })
+
+  it('refuses to overwrite a hooks file it cannot parse', () => {
+    writeHooksFile('{ "version": "v1", "hooks": ')
+
+    expect(kiroHookService.install()).toMatchObject({ state: 'error' })
+    expect(readFileSync(getKiroHooksFilePath(), 'utf-8')).toBe('{ "version": "v1", "hooks": ')
+  })
+
+  it('keeps a file that mixes Orca hooks with hooks someone else added', () => {
+    kiroHookService.install()
+    const file = readHooksFile()
+    const mixed = JSON.stringify({
+      ...file,
+      hooks: [
+        ...(file.hooks ?? []),
+        { name: 'mine', trigger: 'Stop', action: { type: 'command', command: 'notify.sh' } }
+      ]
+    })
+    writeHooksFile(mixed)
+
+    kiroHookService.remove()
+    expect(readFileSync(getKiroHooksFilePath(), 'utf-8')).toBe(mixed)
+  })
+
   it('leaves a same-named file alone when it does not run the Orca script', () => {
     const userFile = JSON.stringify({
       version: 'v1',

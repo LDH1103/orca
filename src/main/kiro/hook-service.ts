@@ -7,8 +7,10 @@ import {
   writeHooksJson,
   writeManagedScript
 } from '../agent-hooks/installer-utils'
+import { parseHooksJsonText } from '../agent-hooks/hooks-json-read'
 import { refreshManagedScriptIfPresent } from '../agent-hooks/managed-hook-script-refresh'
 import {
+  readTextFileRemote,
   writeHooksJsonRemote,
   writeManagedScriptRemote
 } from '../agent-hooks/installer-utils-remote'
@@ -27,9 +29,12 @@ import {
   getKiroPosixManagedScriptFileName,
   getKiroRemoteHooksFilePath,
   getKiroRemoteManagedCommand,
+  isOrcaOwnedKiroHooksFile,
   KIRO_HOOK_EVENTS,
   readManagedKiroHookEvents
 } from './hook-settings'
+
+const FOREIGN_HOOKS_FILE_DETAIL = 'A Kiro hooks file Orca does not own already uses this name'
 
 function getManagedScript(target: 'local' | 'posix' = 'local'): string {
   if (target === 'local' && process.platform === 'win32') {
@@ -83,12 +88,13 @@ export class KiroHookService {
       return kiroHookError(configPath, 'Could not read the Orca Kiro hooks file')
     }
     const base = { agent: 'kiro' as const, configPath }
-    const present = readManagedKiroHookEvents(config)
-    const missing = KIRO_HOOK_EVENTS.filter((event) => !present.has(event))
+    // Why active only: Kiro skips disabled entries and files that are not v1, so those never fire.
+    const active = readManagedKiroHookEvents(config, { activeOnly: true })
+    const missing = KIRO_HOOK_EVENTS.filter((event) => !active.has(event))
     if (missing.length === 0) {
       return { ...base, state: 'installed', managedHooksPresent: true, detail: null }
     }
-    if (present.size === 0) {
+    if (readManagedKiroHookEvents(config).size === 0) {
       return { ...base, state: 'not_installed', managedHooksPresent: false, detail: null }
     }
     return {
@@ -101,10 +107,18 @@ export class KiroHookService {
 
   install(): AgentHookInstallStatus {
     const configPath = getKiroHooksFilePath()
+    const { config } = readHooksJsonWithRaw(configPath)
+    if (!config) {
+      return kiroHookError(configPath, 'Could not read the Orca Kiro hooks file')
+    }
+    // Why: the name is Orca's, but a file someone else wrote there keeps its hooks.
+    if (!isOrcaOwnedKiroHooksFile(config)) {
+      return kiroHookError(configPath, FOREIGN_HOOKS_FILE_DETAIL)
+    }
     const scriptPath = getKiroManagedScriptPath()
     // Why: write the script first so the hooks file never points at a missing file.
     writeManagedScript(scriptPath, getManagedScript())
-    // Why no merge: Orca owns this file outright, so install rewrites it whole.
+    // Why no merge: every entry is Orca's (checked above), so install rewrites the file whole.
     writeHooksJson(configPath, buildKiroHooksFile(getKiroManagedCommand(scriptPath)))
     return this.getStatus()
   }
@@ -115,6 +129,14 @@ export class KiroHookService {
     // Why: remote-Windows is out of scope; process.platform describes the local box, not the host.
     const remoteScriptPath = `${remoteHome.replace(/\/$/, '')}/.orca/agent-hooks/${getKiroPosixManagedScriptFileName()}`
     try {
+      const body = await readTextFileRemote(sftp, remoteConfigPath)
+      const existing = body === null ? {} : parseHooksJsonText(body)
+      if (!existing) {
+        return kiroHookError(remoteConfigPath, 'Could not parse the remote Orca Kiro hooks file')
+      }
+      if (!isOrcaOwnedKiroHooksFile(existing)) {
+        return kiroHookError(remoteConfigPath, FOREIGN_HOOKS_FILE_DETAIL)
+      }
       await writeManagedScriptRemote(sftp, remoteScriptPath, getManagedScript('posix'))
       await writeHooksJsonRemote(
         sftp,
@@ -136,8 +158,9 @@ export class KiroHookService {
   remove(): AgentHookInstallStatus {
     const configPath = getKiroHooksFilePath()
     const { config } = readHooksJsonWithRaw(configPath)
-    // Why: delete only a file that still runs Orca's script, never one that merely shares the name.
-    if (config && readManagedKiroHookEvents(config).size > 0) {
+    // Why: delete only a file whose every hook runs Orca's script, never one that merely shares the
+    // name or mixes in hooks someone else added.
+    if (config && readManagedKiroHookEvents(config).size > 0 && isOrcaOwnedKiroHooksFile(config)) {
       unlinkSync(configPath)
     }
     return this.getStatus()

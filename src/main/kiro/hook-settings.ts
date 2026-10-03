@@ -79,25 +79,46 @@ export function buildKiroHooksFile(command: string): KiroHooksFile {
   }
 }
 
-/** Triggers in `file` whose action runs Orca's managed Kiro script. */
-export function readManagedKiroHookEvents(file: KiroHooksFile): Set<string> {
-  const isManagedCommand = createManagedCommandMatcher(getKiroManagedScriptFileName())
+function kiroHookEntries(file: KiroHooksFile): unknown[] {
+  return Array.isArray(file.hooks) ? file.hooks : []
+}
+
+function runsManagedKiroScript(entry: unknown): boolean {
+  const action = isPlainObject(entry) ? entry.action : undefined
+  return (
+    isPlainObject(action) &&
+    typeof action.command === 'string' &&
+    createManagedCommandMatcher(getKiroManagedScriptFileName())(action.command)
+  )
+}
+
+/**
+ * Triggers in `file` whose action runs Orca's managed Kiro script. `activeOnly` keeps just the
+ * entries Kiro would run: none unless the file is `version: "v1"`, and none marked `enabled: false`.
+ */
+export function readManagedKiroHookEvents(
+  file: KiroHooksFile,
+  options: { activeOnly?: boolean } = {}
+): Set<string> {
   const present = new Set<string>()
-  if (!Array.isArray(file.hooks)) {
+  if (options.activeOnly && file.version !== 'v1') {
     return present
   }
-  for (const entry of file.hooks) {
+  for (const entry of kiroHookEntries(file)) {
     if (!isPlainObject(entry) || typeof entry.trigger !== 'string') {
       continue
     }
-    const action = entry.action
-    if (
-      isPlainObject(action) &&
-      typeof action.command === 'string' &&
-      isManagedCommand(action.command)
-    ) {
+    if (options.activeOnly && entry.enabled === false) {
+      continue
+    }
+    if (runsManagedKiroScript(entry)) {
       present.add(entry.trigger)
     }
   }
   return present
+}
+
+/** Whether every hook in `file` runs Orca's script, so the file is Orca's to rewrite or delete. */
+export function isOrcaOwnedKiroHooksFile(file: KiroHooksFile): boolean {
+  return kiroHookEntries(file).every(runsManagedKiroScript)
 }
