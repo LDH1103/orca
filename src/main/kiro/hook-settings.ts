@@ -122,3 +122,8 @@ export function readManagedKiroHookEvents(
 export function isOrcaOwnedKiroHooksFile(file: KiroHooksFile): boolean {
   return kiroHookEntries(file).every(runsManagedKiroScript)
 }
+
+/** `file` with the hooks that run Orca's script dropped and every other hook kept as is. */
+export function removeManagedKiroHooks(file: KiroHooksFile): KiroHooksFile {
+  return { ...file, hooks: kiroHookEntries(file).filter((entry) => !runsManagedKiroScript(entry)) }
+}

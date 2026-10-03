@@ -145,20 +145,19 @@ describe('KiroHookService', () => {
     expect(readFileSync(getKiroHooksFilePath(), 'utf-8')).toBe('{ "version": "v1", "hooks": ')
   })
 
-  it('keeps a file that mixes Orca hooks with hooks someone else added', () => {
+  it('strips only its own hooks from a file that mixes in hooks someone else added', () => {
     kiroHookService.install()
     const file = readHooksFile()
-    const mixed = JSON.stringify({
-      ...file,
-      hooks: [
-        ...(file.hooks ?? []),
-        { name: 'mine', trigger: 'Stop', action: { type: 'command', command: 'notify.sh' } }
-      ]
-    })
-    writeHooksFile(mixed)
+    const userHook = {
+      name: 'mine',
+      trigger: 'Stop',
+      action: { type: 'command', command: 'notify.sh' }
+    }
+    writeHooksFile(JSON.stringify({ ...file, hooks: [...(file.hooks ?? []), userHook] }))
 
-    kiroHookService.remove()
-    expect(readFileSync(getKiroHooksFilePath(), 'utf-8')).toBe(mixed)
+    const status = kiroHookService.remove()
+    expect(readHooksFile()).toEqual({ version: 'v1', hooks: [userHook] })
+    expect(status).toMatchObject({ state: 'not_installed', managedHooksPresent: false })
   })
 
   it('leaves a same-named file alone when it does not run the Orca script', () => {

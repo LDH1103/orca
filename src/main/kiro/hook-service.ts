@@ -31,7 +31,8 @@ import {
   getKiroRemoteManagedCommand,
   isOrcaOwnedKiroHooksFile,
   KIRO_HOOK_EVENTS,
-  readManagedKiroHookEvents
+  readManagedKiroHookEvents,
+  removeManagedKiroHooks
 } from './hook-settings'
 
 const FOREIGN_HOOKS_FILE_DETAIL = 'A Kiro hooks file Orca does not own already uses this name'
@@ -158,10 +159,14 @@ export class KiroHookService {
   remove(): AgentHookInstallStatus {
     const configPath = getKiroHooksFilePath()
     const { config } = readHooksJsonWithRaw(configPath)
-    // Why: delete only a file whose every hook runs Orca's script, never one that merely shares the
-    // name or mixes in hooks someone else added.
-    if (config && readManagedKiroHookEvents(config).size > 0 && isOrcaOwnedKiroHooksFile(config)) {
+    if (!config || readManagedKiroHookEvents(config).size === 0) {
+      return this.getStatus()
+    }
+    // Why: delete the file only when every hook in it is Orca's; hooks someone else added stay.
+    if (isOrcaOwnedKiroHooksFile(config)) {
       unlinkSync(configPath)
+    } else {
+      writeHooksJson(configPath, removeManagedKiroHooks(config))
     }
     return this.getStatus()
   }
