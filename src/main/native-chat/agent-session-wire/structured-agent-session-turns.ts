@@ -24,6 +24,7 @@ import {
 import { isAgentSessionRefusalError } from '../../../shared/agent-session-wire-refusals'
 import { DISPATCH_DOUBT_PERSISTENCE_FAILED } from '../agent-session-journal/journal-dispatch-doubt-reasons'
 import type { AgentSessionJournal } from '../agent-session-journal/journal-store'
+import type { JournalOperationReceipt } from '../agent-session-journal/journal-row-writer'
 import type {
   AgentSessionDispatchOutcome,
   StructuredAgentSessionAdapter,
@@ -42,6 +43,7 @@ import {
   journalOpenRefusal
 } from '../agent-session-journal/journal-open-failure'
 import type { StructuredAgentSessionLogger } from './structured-agent-session-logger'
+import type { StructuredAgentRegistry } from './structured-agent-registry'
 export { performSetOption } from './structured-agent-session-turns-options'
 export { performPrompt } from './structured-agent-session-turns-prompt'
 export { performCancel } from './structured-agent-session-turns-cancel'
@@ -51,6 +53,10 @@ export type AgentSessionTurnContext = {
   journal: AgentSessionJournal
   fence: number
   adapter: StructuredAgentSessionAdapter
+  /** What each agent declares; the session's own answer is `agents.capabilities(agent)`. */
+  agents: StructuredAgentRegistry
+  /** The session's agent. */
+  agent: string
   logger: StructuredAgentSessionLogger
   persistedOptions?: Readonly<Record<string, string>>
   persistOptions: (options: Readonly<Record<string, string>>) => Promise<void>
@@ -63,6 +69,8 @@ export type AgentSessionTurnContext = {
   providerChildPhase?: () => StructuredAgentSessionProviderChildPhase | undefined
   /** Who a Stop's refusal row names. */
   failureTextContext?: AgentSessionFailureWordsContext
+  /** The operation's success, committed with the row that accepts it (`MutationPlan.settlesWithWrite`). */
+  operationReceipt?: JournalOperationReceipt
   now: () => number
 }
 
@@ -142,7 +150,11 @@ export async function performSend(
     }
   }
   try {
-    await ctx.journal.appendSubmission({ ...input, fence: ctx.fence, handoverRecorded: true })
+    await ctx.journal.appendSubmission(
+      { ...input, fence: ctx.fence, handoverRecorded: true },
+      undefined,
+      ctx.operationReceipt
+    )
   } catch (error) {
     // Damage SQLite proves is the chat's, and no retry writes past it: say so, as an open does. So
     // does a chat holding a newer Orca's rows, which only an update writes past, and a refusal the
@@ -224,6 +236,7 @@ export async function handOverSubmission(
               state: 'rejected',
               reason: outcome.reason,
               rejection: outcome.rejection,
+              ...(outcome.answeredInTurn ? { answeredInTurn: outcome.answeredInTurn } : {}),
               fence: ctx.fence
             }
           : { clientMessageId, state: 'unknown', reason: outcome.reason, fence: ctx.fence }

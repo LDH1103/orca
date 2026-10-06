@@ -1,5 +1,9 @@
 import type { AgentSessionModelCatalogResult } from '../../../shared/agent-session-wire'
-import type { AgentSessionRecord } from '../../../shared/agent-session-record'
+import type {
+  AgentSessionAccountHome,
+  AgentSessionRecord
+} from '../../../shared/agent-session-record'
+import type { AgentSessionHandleProvider } from '../../../shared/agent-session-provider-handle'
 import {
   agentModelCatalogFingerprint,
   agentModelCatalogFingerprintForRecord
@@ -16,9 +20,7 @@ export type AgentModelCatalogServiceDeps = {
   /** The account home a structured launch for this agent would pin right now —
    *  the SAME resolver the create path fills `record.accountHome` with, so a
    *  record-less read can never answer from another account's listing. */
-  resolveAccountHome: (
-    agent: 'claude' | 'codex'
-  ) => Promise<{ variable: 'CLAUDE_CONFIG_DIR' | 'CODEX_HOME'; path: string }>
+  resolveAccountHome: (agent: AgentSessionHandleProvider) => Promise<AgentSessionAccountHome>
   /** Session-less listers, one per agent that has one on this host. */
   probes?: Partial<Record<'claude' | 'codex', AgentModelCatalogProbe>>
   /** Whether the workspace's own config could pick a model other than the listed default. */
@@ -35,6 +37,8 @@ export type AgentModelCatalogService = {
     sessionId?: string
     /** Where a new chat would run; null when one was named but is not a local directory. */
     workspacePath?: string | null
+    /** With no entry yet, answer from the listing this read starts or joins instead of `unknown`. */
+    waitForListing?: boolean
   }) => Promise<AgentSessionModelCatalogResult>
 }
 
@@ -79,8 +83,9 @@ async function workspaceKeepsListedDefault(
  * launch); without one, the key is the account a launch would pin right now —
  * never "whichever account listed last". `unknown` tells the client to keep
  * its static seed, and a missing or aged entry kicks one joined background
- * probe so the next read is warm. Failures are the store's 30s TTL, never an
- * answer — a picker is a user surface and must not block.
+ * probe so the next read is warm. With no entry, the answer says that listing
+ * is running, and only a read that asks waits for it. Failures are the store's
+ * 30s TTL, never an answer: inside it a read answers `unknown` at once.
  */
 export function createAgentModelCatalogService(
   deps: AgentModelCatalogServiceDeps
@@ -96,7 +101,7 @@ export function createAgentModelCatalogService(
         // Probes spawn natively; a WSL-pinned record has no host-side lister.
         accountHomePath = scoped.location.wslDistro === null ? scoped.accountHome.path : null
       } else {
-        let resolved: { variable: 'CLAUDE_CONFIG_DIR' | 'CODEX_HOME'; path: string }
+        let resolved: AgentSessionAccountHome
         try {
           resolved = await deps.resolveAccountHome(params.agent)
         } catch {
@@ -110,14 +115,27 @@ export function createAgentModelCatalogService(
         })
         accountHomePath = resolved.path
       }
-      const entry = deps.store.get(fingerprint)
+      let entry = deps.store.get(fingerprint)
       const probe = deps.probes?.[params.agent]
-      if (probe && accountHomePath && deps.store.shouldRefresh(fingerprint)) {
-        const home = accountHomePath
-        void deps.store.refresh(fingerprint, params.agent, () => probe(home))
-      }
+      const home = accountHomePath
+      // Without an entry, join a running listing too: that is the one a waiting read answers from.
+      const listing =
+        probe &&
+        home &&
+        (entry ? deps.store.shouldRefresh(fingerprint) : !deps.store.hasActiveFailure(fingerprint))
+          ? deps.store.refresh(fingerprint, params.agent, () => probe(home))
+          : null
       if (!entry) {
-        return { origin: 'unknown' }
+        if (!listing) {
+          return { origin: 'unknown' }
+        }
+        if (!params.waitForListing) {
+          return { origin: 'unknown', listingInProgress: true }
+        }
+        entry = await listing
+        if (!entry) {
+          return { origin: 'unknown' }
+        }
       }
       return resultFromEntry(
         entry,

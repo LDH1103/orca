@@ -1,4 +1,6 @@
+import { probeWorkerOpenCodeModelLaunchSupport } from './worker-opencode-model-preflight'
 import { resolveWorkerConfiguredAgentParams } from './worker-configured-agent-preflight'
+import { waitForWorkerAgentReady } from '../../../../launched-agent-composer-readiness'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import { describeTerminalWaitBlockedReason } from '../../../../../../shared/terminal-wait-blocked-reason-legacy-alias'
 import type { OrchestrationDb } from '../../../../orchestration/db'
@@ -70,10 +72,25 @@ export async function startLocalWorker(args: {
           worktree: requestedWorktree === 'current' ? `id:${callerWorkspaceId}` : requestedWorktree
         }
   })
+  let openCodeModelLaunchSupported = false
+  if (!createsWorktree && launchParams.agent === 'opencode' && launchParams.model) {
+    const callerWorkspaceId = await resolveDispatchCallerWorktreeId(
+      runtime,
+      params.from,
+      callerSession
+    )
+    openCodeModelLaunchSupported = await probeWorkerOpenCodeModelLaunchSupport(
+      runtime,
+      launchParams,
+      { worktree: requestedWorktree === 'current' ? `id:${callerWorkspaceId}` : requestedWorktree }
+    )
+  }
+
   const { agent, launch } = prepareLocalWorkerStart({
     params: launchParams,
     createsWorktree,
-    runtime
+    runtime,
+    openCodeModelLaunchSupported
   })
 
   const coordinatorWorktreeId = await resolveDispatchCallerWorktreeId(
@@ -208,17 +225,11 @@ export async function startLocalWorker(args: {
           effects,
           timeoutMs: params.timeoutMs ?? 60_000
         })
-      : // ZCode emits SessionStart only after input; its first dispatch must wait for the composer.
-        agent === 'zcode' && !params.terminal
-        ? await runtime.waitForFreshWorkerComposer(
-            terminalHandle,
-            agent,
-            params.timeoutMs ?? 60_000
-          )
-        : await runtime.waitForTerminal(terminalHandle, {
-            condition: 'tui-idle',
-            timeoutMs: params.timeoutMs ?? 60_000
-          })
+      : await waitForWorkerAgentReady(runtime, terminalHandle, {
+          agent,
+          reusesTerminal: Boolean(params.terminal),
+          timeoutMs: params.timeoutMs ?? 60_000
+        })
     if (wait) {
       persistWorkerSetupWaitOutcome({ ...setupStage, wait })
       if (!wait.satisfied) {
@@ -258,6 +269,7 @@ export async function startLocalWorker(args: {
       devMode: params.devMode,
       requestId: orchestrationMutation?.requestId ?? started.dispatch.id,
       agent: agent ?? null,
+      launchedAgent: params.terminal ? null : (agent ?? null),
       setupReceipt,
       launchReceipt: launch.receipt,
       mode,

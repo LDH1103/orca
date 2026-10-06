@@ -25,6 +25,7 @@ import { openJournalOwingImport } from '../agent-session-journal/journal-owed-im
 import { createCodexJournalTranslator } from '../../codex/codex-structured-journal-translation'
 import { createStructuredAgentSessionLogger } from './structured-agent-session-logger'
 import { testEventSinkLogging } from './structured-agent-session-logger-test-support'
+import { codexProviderHandle } from '../../../shared/agent-session-provider-handle-encoding'
 
 const BODY: AgentJournalItemBody = {
   kind: 'message',
@@ -37,7 +38,7 @@ const JOURNAL_IDENTITY = {
   workspaceId: 'workspace-1',
   hostId: 'host-1',
   agent: 'codex',
-  providerHandle: { kind: 'codex', threadId: 'thread-1' }
+  providerHandle: codexProviderHandle('thread-1')
 } as const
 
 function identity(ordinal: number): AgentJournalItemIdentity {
@@ -243,6 +244,23 @@ describe('deferred structured agent-session event sink', () => {
     expect(log).toEqual([])
   })
 
+  it('says its writes landed only when they ran, though a close still settles drained()', async () => {
+    const log: Recorded[] = []
+    const deferred = createDeferredStructuredAgentSessionEventSink(testEventSinkLogging())
+    deferred.bind(target(1, log))
+    deferred.sink.appendItem(identity(0), BODY, { turnScope: AGENT_JOURNAL_THREAD_SCOPE })
+    expect(await deferred.sink.written?.()).toEqual({ ok: true })
+
+    deferred.unbind()
+    deferred.sink.appendItem(identity(1), BODY, { turnScope: AGENT_JOURNAL_THREAD_SCOPE })
+    const written = deferred.sink.written?.()
+    deferred.close()
+
+    expect(await written).toMatchObject({ ok: false })
+    expect(await deferred.drained()).toEqual({ ok: true })
+    expect(log).toEqual([{ call: 'appendItem', fence: 1, ordinal: 0 }])
+  })
+
   it('lands writes already handed to the journal when closed; only never-bound ones drop', async () => {
     const owed = await owingTarget(3)
     const deferred = createDeferredStructuredAgentSessionEventSink(testEventSinkLogging())
@@ -253,6 +271,7 @@ describe('deferred structured agent-session event sink', () => {
     deferred.sink.appendItem(identity(2), BODY, { turnScope: AGENT_JOURNAL_THREAD_SCOPE })
     // Handed over, waiting behind the copy: none has landed when the sink closes.
     expect(owed.landed()).toEqual([])
+    const written = deferred.sink.written?.()
     deferred.close()
     expect(
       deferred.sink.tryAppendItem?.(identity(3), BODY, { turnScope: AGENT_JOURNAL_THREAD_SCOPE })
@@ -260,6 +279,7 @@ describe('deferred structured agent-session event sink', () => {
     await expect(deferred.drained()).resolves.toEqual({ ok: true })
 
     expect(owed.landed()).toEqual([0, 1, 2])
+    await expect(written).resolves.toEqual({ ok: true })
     expect(owed.journal.cursor().sequence).toBe(owed.history + 3)
     await owed.dispose()
   })

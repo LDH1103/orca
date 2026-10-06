@@ -26,11 +26,11 @@ the structured-session mapping and nothing else.
 An audit on 2026-09-09 found six producers and three consumers, and three
 separate copies of the same row inside the main process alone:
 
-| Main-process copy                 | Keyed by  | Owned by                                                                          | Persisted          | Evicted                      |
-| --------------------------------- | --------- | --------------------------------------------------------------------------------- | ------------------ | ---------------------------- |
-| hook server `lastStatusByPaneKey` | paneKey   | `src/main/agent-hooks/server.ts`                                                  | `last-status.json` | tab close, pty exit, hydrate |
-| runtime `RuntimeAgentRowStore`    | paneKey   | `runtime-agent-row-store.ts` (deleted in PR 1b)                                   | no                 | pty exit only                |
-| structured feed `published`       | sessionId | `src/main/native-chat/agent-session-wire/structured-agent-session-status-feed.ts` | no                 | never (a broadcast cache)    |
+| Main-process copy                 | Keyed by  | Owned by                                                                          | Persisted          | Evicted                                        |
+| --------------------------------- | --------- | --------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------- |
+| hook server `lastStatusByPaneKey` | paneKey   | `src/main/agent-hooks/server.ts`                                                  | `last-status.json` | tab close, pty exit, hydrate, worktree removal |
+| runtime `RuntimeAgentRowStore`    | paneKey   | `runtime-agent-row-store.ts` (deleted in PR 1b)                                   | no                 | pty exit only                                  |
+| structured feed `published`       | sessionId | `src/main/native-chat/agent-session-wire/structured-agent-session-status-feed.ts` | no                 | never (a broadcast cache)                      |
 
 The second copy is a duplicate write: the OSC status parsed in main is
 forwarded to the hook server _and_ retained in the runtime store from the same
@@ -288,7 +288,10 @@ Every lane, Codex included, combines through the fold. A child waiting on a
 human is a fold input (`childWorkLiveness: 'waiting'`, derived from the child's
 own `waiting` state; a child's `blocked` means it failed and stays live work)
 and makes the row wait whatever the main agent is doing, unless the main agent
-is itself asking. Only the Codex hook lane feeds that input today. Known
+is itself asking. The Codex hook lane feeds it from its child transcripts, and
+the structured lanes from child records, which read `waiting` for a Codex child
+thread's approval or input flag and for a Claude subagent's open permission
+request. Known
 divergences, pinned by name in the parity table
 (`src/shared/main-agent-status-parity.test.ts`) where they are reachable, so a
 reader does not mistake them for drift:
@@ -299,8 +302,13 @@ reader does not mistake them for drift:
   main agent event overwrites the slot, so the row stops reading `waiting`
   while the child is still asking, and a second asking child replaces the
   first.
-- The structured lane has no per-child wait: a child's pending prompt makes
-  the session `attention`, which reads as the main agent's own `blocked`.
+- In the structured lane a child's pending prompt also makes the session
+  `attention`, which reads as the main agent's own `blocked`: one needs-input
+  state whoever asked. A Claude subagent reads `waiting` only while the
+  journal holds its card pending: from after the card's row is written until
+  just before anyone closes it, so every publish that shows the child waiting
+  also shows the session's `attention`, and the row never reads `waiting` for
+  a Claude subagent's request.
 - The Codex hook lane drops its roster on a root `Stop` when it tracks no
   child transcripts, so a still-running or still-asking child stops holding
   the row.
@@ -424,6 +432,7 @@ writers:
 | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Command Code output seeds, parked-pane seeds, pty-exit removal    | delete; main already emits the same facts                                                                |
 | structured bridge status writes                                   | delete; main now publishes the row                                                                       |
+| structured bridge failed-start row (the host refused the create)  | keep; a refused create leaves the host no session, so the bridge writes it from the launch record        |
 | launch placeholder seeds (a user launched an agent with a prompt) | keep for now; main holds the launch config and can seed later                                            |
 | dismissal, acknowledgement, unmount                               | keep; user facts and component lifecycle                                                                 |
 | remote-runtime OSC parse (bytes never transit local main)         | keep, fenced behind the host's published row once the host is new enough; rule 3 of the wire doc applies |
