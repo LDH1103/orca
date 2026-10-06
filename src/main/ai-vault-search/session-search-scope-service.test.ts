@@ -29,7 +29,7 @@ describe('scope identity at the search choke point', () => {
       {
         query: 'needle',
         supportsQoderHistory: true,
-        supportsKiroHistory: true,
+        supportsJcodeHistory: true,
         within: { kind: 'workspace', worktreeId: 'repo-1::/work/app' }
       },
       'ipc'
@@ -49,7 +49,7 @@ describe('scope identity at the search choke point', () => {
       {
         query: 'needle',
         supportsQoderHistory: true,
-        supportsKiroHistory: true,
+        supportsJcodeHistory: true,
         within: { kind: 'project', projectKey: 'repo:repo-1' }
       },
       'ipc'
@@ -69,7 +69,7 @@ describe('scope identity at the search choke point', () => {
       {
         query: 'needle',
         supportsQoderHistory: true,
-        supportsKiroHistory: true,
+        supportsJcodeHistory: true,
         within: { kind: 'project', projectKey: 'repo:elsewhere' }
       },
       'ipc'
@@ -92,7 +92,7 @@ describe('scope identity at the search choke point', () => {
       {
         query: 'needle',
         supportsQoderHistory: true,
-        supportsKiroHistory: true,
+        supportsJcodeHistory: true,
         within: { kind: 'workspace', worktreeId: 'repo-1::/work/app' }
       },
       'ipc'
@@ -121,7 +121,7 @@ describe('scope identity at the search choke point', () => {
       {
         query: 'needle',
         supportsQoderHistory: true,
-        supportsKiroHistory: true,
+        supportsJcodeHistory: true,
         within: { kind: 'project', projectKey: 'repo:repo-1' }
       },
       'ipc'
@@ -139,7 +139,7 @@ describe('scope identity at the search choke point', () => {
     setSessionSearchService(service)
     installSessionSearchScopeCatalogSource(() => CATALOG)
     await searchSessionService(
-      { query: 'needle', supportsQoderHistory: true, supportsKiroHistory: true },
+      { query: 'needle', supportsQoderHistory: true, supportsJcodeHistory: true },
       'ipc'
     )
     expect(service.search).toHaveBeenCalledWith({ query: 'needle', limit: 20 }, undefined)
@@ -153,7 +153,7 @@ describe('scope identity at the search choke point', () => {
       {
         query: 'needle',
         supportsQoderHistory: true,
-        supportsKiroHistory: true,
+        supportsJcodeHistory: true,
         filters: { scopePaths: ['/other'] }
       },
       'ipc'

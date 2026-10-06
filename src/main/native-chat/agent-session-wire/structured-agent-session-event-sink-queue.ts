@@ -51,6 +51,8 @@ export class StructuredAgentSessionSinkQueue {
   private backpressured = false
   private acceptedSequence = 0
   private settledSequence = 0
+  /** The newest operation handed to the journal; a close drops the buffered rest unwritten. */
+  private handedOverSequence = 0
   /** Settles once every operation handed over so far has, in handover order. */
   private handedOverSettled: Promise<void> = Promise.resolve()
   private readonly buffered: Admitted[] = []
@@ -83,8 +85,8 @@ export class StructuredAgentSessionSinkQueue {
 
   journalLinkage = (): StructuredAgentSessionLinkageJournal | null => this.target?.journal ?? null
 
-  journalStopDecidesTurn = (turnId: string, endedAt: number, openedBy?: string): boolean =>
-    this.target?.journal.stopMarks.personStopDecides(turnId, endedAt, openedBy) ?? false
+  journalStopDecidesTurn = (turnId: string, endedAt: number): boolean =>
+    this.target?.journal.stopMarks.personStopDecides(turnId, endedAt) ?? false
 
   bindReadingControl(control: StructuredAgentSessionReadingControl): () => void {
     this.readingControl = control
@@ -125,6 +127,15 @@ export class StructuredAgentSessionSinkQueue {
       return Promise.resolve(this.barrierResult())
     }
     return new Promise((resolve) => this.waiters.push({ through, resolve }))
+  }
+
+  /** Like `barrier`, but a close that dropped writes admitted so far reads as not landed. */
+  written = async (): Promise<StructuredAgentSessionSinkBarrier> => {
+    const through = this.acceptedSequence
+    const settled = await this.barrier()
+    return settled.ok && this.handedOverSequence < through
+      ? { ok: false, error: new Error('the sink closed before its writes landed') }
+      : settled
   }
 
   submit(
@@ -193,6 +204,7 @@ export class StructuredAgentSessionSinkQueue {
 
   private handOver(operation: Admitted, bound: StructuredAgentSessionEventTarget): void {
     const earlier = this.handedOverSettled
+    this.handedOverSequence = operation.sequence
     const key = operation.publicationKey
     let outcome: Promise<unknown>
     if (key === undefined) {

@@ -25,7 +25,8 @@ import {
   getAccountsLocationSearchEntries,
   getAccountsMiniMaxSearchEntries,
   getAccountsOpencodeSearchEntries,
-  getAccountsPaneSearchEntries
+  getAccountsPaneSearchEntries,
+  getAccountsZcodePlanSearchEntries
 } from './accounts-search'
 import { getRemoteAccountsPaneScope } from './provider-account-scope'
 import { ProviderHostScopeControl } from './ProviderHostScopeControl'
@@ -42,6 +43,7 @@ import { GrokAccountsSection } from './GrokAccountsSection'
 import { AntigravityAccountsSection } from './AntigravityAccountsSection'
 import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { CursorAccountsSection } from './CursorAccountsSection'
+import { ZcodePlanAccountsSection } from './ZcodePlanAccountsSection'
 import type {
   AccountsPaneProps,
   AccountsPaneSectionModel,
@@ -64,6 +66,7 @@ import {
   renderOpenCodeAccountsSection
 } from './accounts-pane-provider-setting-sections'
 import { renderMiniMaxAccountsSection } from './accounts-pane-minimax-section'
+import { ManagedDataAccountsSection } from './ManagedDataAccountsSection'
 import { renderAccountsRemovalDialogs } from './accounts-pane-removal-dialogs'
 
 export { getAccountsPaneSearchEntries }
@@ -373,6 +376,12 @@ export function AccountsPane({
     clearMiniMaxCookie
   }
   const visibleSections = [
+    !searchQuery || /opencode|devin|account/i.test(searchQuery) ? (
+      <div key={settings.activeRuntimeEnvironmentId ?? 'local'} className="space-y-8">
+        <ManagedDataAccountsSection provider="opencode" target={getActiveRuntimeTarget(settings)} />
+        <ManagedDataAccountsSection provider="devin" target={getActiveRuntimeTarget(settings)} />
+      </div>
+    ) : null,
     wslSupportedPlatform &&
     !isRemoteAccountScope &&
     matchesSettingsSearch(searchQuery, getAccountsLocationSearchEntries())
@@ -406,6 +415,9 @@ export function AccountsPane({
     ) : null,
     matchesSettingsSearch(searchQuery, getAccountsCursorSearchEntries()) ? (
       <CursorAccountsSection key="cursor" />
+    ) : null,
+    matchesSettingsSearch(searchQuery, getAccountsZcodePlanSearchEntries()) ? (
+      <ZcodePlanAccountsSection key="zcode" />
     ) : null
   ]
 

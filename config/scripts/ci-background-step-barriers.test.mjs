@@ -20,8 +20,7 @@ function assertJoinedBefore(steps, id, consumer) {
 describe('CI background step barriers', () => {
   it('joins every background check without suppressing failures', () => {
     for (const job of [
-      pr.jobs.static_analysis,
-      pr.jobs.typecheck,
+      pr.jobs.preflight,
       pr.jobs.mobile_web_app,
       pr.jobs.package,
       pr.jobs.shell_contracts,
@@ -52,7 +51,7 @@ describe('CI background step barriers', () => {
 
   it('joins planning before publishing the unit artifact', () => {
     assertJoinedBefore(
-      pr.jobs.typecheck.steps,
+      pr.jobs.preflight.steps,
       'unit-plan',
       (step) => step.uses === 'actions/upload-artifact@v7'
     )
@@ -88,7 +87,7 @@ describe('CI background step barriers', () => {
   })
 
   it('finishes native import-cycle analysis before mobile installation changes resolution', () => {
-    const steps = pr.jobs.static_analysis.steps
+    const steps = pr.jobs.preflight.steps
     assertJoinedBefore(steps, 'native-code-quality', (step) =>
       step.uses?.endsWith('/install-mobile-dependencies')
     )
@@ -97,13 +96,13 @@ describe('CI background step barriers', () => {
     expect(steps.findIndex((step) => step.id === 'changed-code-quality')).toBeGreaterThan(install)
   })
 
-  it('serializes mobile pnpm entrypoints before allocating test workers', () => {
+  it('joins independent mobile typechecks before allocating test workers', () => {
     const steps = mobile.jobs.verify.steps
     assertJoinedBefore(steps, 'production-types', (step) => step.name === 'Test')
     const ratchet = steps.findIndex((step) => step.name === 'Typecheck tests (ratchet)')
     const join = steps.findIndex((step) => step.wait === 'production-types')
     expect(steps[ratchet].background).toBeUndefined()
-    expect(ratchet).toBeGreaterThan(join)
+    expect(ratchet).toBeLessThan(join)
   })
 
   it('waits for WebKit and the bundle before any browser tests', () => {

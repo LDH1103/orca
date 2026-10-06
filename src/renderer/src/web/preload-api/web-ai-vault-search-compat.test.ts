@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { searchResults } from '../../../../shared/ai-vault-search-test-fixture'
 import { unavailableSessionSearchStatus } from '../../../../shared/ai-vault-search-client'
+import { AI_VAULT_AGENTS } from '../../../../shared/ai-vault-types'
 
 const callRuntimeResult = vi.hoisted(() => vi.fn())
 vi.mock('./web-runtime-calls', () => ({ callRuntimeResult }))
@@ -21,8 +22,9 @@ describe('web session search preload compatibility', () => {
     expect(callRuntimeResult).toHaveBeenCalledExactlyOnceWith('aiVault.searchSessions', {
       query: 'needle',
       limit: 20,
+      supportedAgents: [...AI_VAULT_AGENTS],
       supportsQoderHistory: true,
-      supportsKiroHistory: true
+      supportsJcodeHistory: true
     })
     expect(result).toMatchObject({ kind: 'results', hits: [{ source: { presence: 'present' } }] })
     expect(JSON.stringify(result)).not.toContain('resumeCommand')

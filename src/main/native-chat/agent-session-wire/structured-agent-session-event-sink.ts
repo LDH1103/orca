@@ -95,6 +95,9 @@ export type StructuredAgentSessionEventSink = {
     options?: StructuredAgentSessionAppendOptions
   ): StructuredAgentSessionSinkAdmission
   publish(options?: StructuredAgentSessionPublishOptions): void
+  /** Resolves `ok` once every write admitted so far has landed in the journal; not `ok` when one
+   *  failed or a close dropped it unwritten. */
+  written?(): Promise<StructuredAgentSessionSinkBarrier>
   setActivity?(activity: AgentSessionTurnActivity | null): void
   tryAppendItem?(
     identity: AgentJournalItemIdentity,
@@ -139,9 +142,8 @@ export type StructuredAgentSessionEventSink = {
   /** The bound journal's producer linkage; null until bound. */
   journalLinkage?(): StructuredAgentSessionLinkageJournal | null
   /** Whether the bound journal's Stop rule makes turn `turnId`, ending at `endedAt` with no verdict
-   *  of its own, a person's cancellation (`personStopDecidesTurn`); false until bound. `openedBy`:
-   *  the submission that opened it, for a turn whose rows have yet to land. */
-  journalStopDecidesTurn?(turnId: string, endedAt: number, openedBy?: string): boolean
+   *  of its own, a person's cancellation (`personStopDecidesTurn`); false until bound. */
+  journalStopDecidesTurn?(turnId: string, endedAt: number): boolean
   appendLifecycleBatch?(
     settlementId: string,
     mutations: readonly JournalLifecycleMutationInput[],
@@ -321,6 +323,7 @@ export function createDeferredStructuredAgentSessionEventSink(deps: {
       publish: (options = {}) => {
         publish(options)
       },
+      written: queue.written,
       setActivity: (activity) => {
         queue.submit({
           bytes: Buffer.byteLength(JSON.stringify(activity), 'utf8') + 64,
