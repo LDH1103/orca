@@ -8,6 +8,7 @@ import type {
 } from '../../../../shared/agent-session-conversation-command'
 import type { AgentType } from '../../../../shared/agent-status-types'
 import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
+import { structuredAgentLabel } from '@/lib/structured-agent-session-launch-label'
 import {
   supportsStructuredAgentSessionPromptCancel,
   supportsStructuredAgentSessionQuestionAnswers
@@ -35,7 +36,10 @@ import { useStructuredAgentSessionContextUsage } from './use-structured-agent-se
 import { useStructuredAgentSessionRailOutline } from './use-structured-agent-session-rail-outline'
 import { useStructuredAgentSessionQueuedMessages } from './use-structured-agent-session-queued-messages'
 import { outboxOutsideQueuedCards } from './structured-agent-session-queued-cards'
+import { structuredAgentSessionStartFailureFacts } from './structured-agent-session-delivery-notices'
 import { hostStatesTurnScopes } from '../../../../shared/native-chat-turn-membership'
+import { pendingPromptsAllUnanswerableHere } from '../../../../shared/agent-session-approval-subject'
+import { withNativeChatCutTurnNotices } from '../../../../shared/native-chat-cut-turn-notice'
 
 export type { StructuredPromptItem } from './structured-agent-session-message-projection'
 
@@ -67,13 +71,21 @@ export function useStructuredAgentSession(args: {
     target,
     transportEnabled = true
   } = args
-  const { state, loadingOlder, olderHistoryGeneration, loadOlder, mutate, write, providerVisible } =
-    useStructuredAgentSessionTransport({
-      sessionId,
-      target,
-      isVisible,
-      enabled: transportEnabled
-    })
+  const {
+    state,
+    stateRef,
+    loadingOlder,
+    olderHistoryGeneration,
+    loadOlder,
+    mutate,
+    write,
+    providerVisible
+  } = useStructuredAgentSessionTransport({
+    sessionId,
+    target,
+    isVisible,
+    enabled: transportEnabled
+  })
   const commandPending = useRef(false)
   const transportState = useStructuredAgentSessionTransportState(state, transportEnabled)
   const {
@@ -105,13 +117,22 @@ export function useStructuredAgentSession(args: {
     () => (transportState.queuedMessages ?? []).map((message) => message.messageId),
     [transportState.queuedMessages]
   )
+  const prompts = pendingStructuredSessionPrompts(transportState.journalItems)
+  // A host's queue waits on any pending prompt, and nothing here can settle one this build cannot
+  // answer: the send must start a turn, after which the card's cancel works.
+  const queueEnabled = queueFollowUps && !pendingPromptsAllUnanswerableHere(prompts)
+  const queueDelivery = useMemo(
+    () => ({ capability: queueCapability, enabled: queueEnabled }),
+    [queueCapability, queueEnabled]
+  )
   const outboxController = useStructuredAgentSessionOutbox({
     sessionId,
     target,
     fence: transportState.fence,
     submissions: transportState.submissions,
+    journalItems: transportState.journalItems,
     composerScopeKey,
-    queueDelivery: { capability: queueCapability, enabled: queueFollowUps },
+    queueDelivery,
     queuedMessageIds
   })
 
@@ -132,7 +153,6 @@ export function useStructuredAgentSession(args: {
     enabled: providerVisible
   })
 
-  const prompts = pendingStructuredSessionPrompts(transportState.journalItems)
   const { outbox } = outboxController
   // A host that takes a Stop naming no turn gets Stop from the send until the work settles; every
   // Stop before a turn opens needs that form. An older host can stop only a turn it has opened.
@@ -142,35 +162,26 @@ export function useStructuredAgentSession(args: {
     transportState.turnId !== null ||
     (stopsConversation &&
       (transportState.isWorking ||
-        hasUnsentStructuredAgentSessionOutboxEntry(
-          outbox,
-          transportState.submissions,
-          outboxController.blockedClientMessageId
-        )))
+        hasUnsentStructuredAgentSessionOutboxEntry(outbox, transportState.submissions)))
   // A queued send is a card, never a transcript bubble.
   const isWorking = transportState.isWorking
   const transcriptOutbox = useMemo(
+    () => outboxOutsideQueuedCards(outbox, queuedMessageIds, isWorking, queueDelivery),
+    [isWorking, outbox, queueDelivery, queuedMessageIds]
+  )
+  // What the transcript reads: the journal plus the one notice a cut turn with no row gets.
+  const transcriptItems = useMemo(
     () =>
-      outboxOutsideQueuedCards(
-        outbox,
-        queuedMessageIds,
-        isWorking,
-        outboxController.blockedClientMessageId,
-        { capability: queueCapability, enabled: queueFollowUps }
-      ),
-    [
-      isWorking,
-      outbox,
-      outboxController.blockedClientMessageId,
-      queueCapability,
-      queueFollowUps,
-      queuedMessageIds
-    ]
+      withNativeChatCutTurnNotices(transportState.journalItems, {
+        agentName: structuredAgentLabel(agent)
+      }),
+    [agent, transportState.journalItems]
   )
   const messages = useStructuredAgentSessionMessages(
-    transportState.journalItems,
+    transcriptItems,
     transcriptOutbox,
-    transportState.submissions
+    transportState.submissions,
+    queuedMessageIds
   )
   const queuedController = useStructuredAgentSessionQueuedMessages({
     enabled: queueCapable && transportState.fence !== null,
@@ -186,6 +197,7 @@ export function useStructuredAgentSession(args: {
     runConversationCommand: (command: AgentSessionConversationCommand) =>
       structuredConversationCommands.sendStructuredConversationCommand({
         command,
+        agentName: structuredAgentLabel(agent),
         pending: commandPending,
         blocked: Boolean(
           transportState.turnId ||
@@ -193,6 +205,7 @@ export function useStructuredAgentSession(args: {
           transportState.backgroundTasks.isMonitoring ||
           outbox.length
         ),
+        startFailures: () => structuredAgentSessionStartFailureFacts(stateRef.current.items),
         send: (command) =>
           write<AgentSessionConversationCommandResult>(
             'agentSession.conversationCommand',
@@ -200,7 +213,8 @@ export function useStructuredAgentSession(args: {
             { command }
           )
       }),
-    journalItems: transportState.journalItems,
+    journalItems: transcriptItems,
+    subagentRoster: transportState.subagentRoster,
     messages,
     status: transportEnabled ? state.status : 'ready',
     /** The outbox's own line; a failed read is worded from `readRefusal`, never its text. */
@@ -214,9 +228,11 @@ export function useStructuredAgentSession(args: {
     loadOlder,
     prompts,
     outbox,
+    failedHere: outboxController.failedHere,
     /** The journal's rows for sent messages, which carry a rejected message's whole fact. */
     submissions: transportState.submissions,
-    blockedClientMessageId: outboxController.blockedClientMessageId,
+    /** The host's queued cards, which hold their own rejected hand-offs. */
+    queuedMessageIds,
     // A message typed during a command queues behind it on the host.
     send: (...input: Parameters<typeof outboxController.send>) =>
       // Legacy: an older host refuses sends while a command runs; removable once those hosts age out.
@@ -244,8 +260,8 @@ export function useStructuredAgentSession(args: {
     },
     queuedMessages: queuedController,
     cancel: async (turnId: string, prompt?: StructuredPromptCancelTarget) => {
-      // Capability negotiation must complete before mutate constructs the payload
-      // fingerprint and operation id: older hosts reject the strict prompt field.
+      // Capability negotiation must complete before mutate fingerprints the payload:
+      // older hosts reject the strict prompt field.
       const promptSupported =
         prompt !== undefined && (await supportsStructuredAgentSessionPromptCancel(target))
       return mutate('agentSession.cancel', 'agentSession.cancel', {

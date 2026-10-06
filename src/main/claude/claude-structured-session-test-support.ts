@@ -15,6 +15,7 @@ import {
   type ClaudeStructuredSessionEvent
 } from './claude-structured-session-adapter'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
+import { claudeProviderHandle } from '../../shared/agent-session-provider-handle-encoding'
 
 export const PROVIDER_SESSION_ID = '819cf9f8-e43c-4ad7-b50f-54aa158a726a'
 
@@ -30,7 +31,7 @@ export function identityFor(sessionId = 'session-1'): AgentSessionJournalIdentit
     workspaceId: 'workspace-1',
     hostId: 'host-1',
     agent: 'claude',
-    providerHandle: { kind: 'claude', sessionId: PROVIDER_SESSION_ID, leafUuid: null }
+    providerHandle: claudeProviderHandle(PROVIDER_SESSION_ID, null)
   }
 }
 
@@ -260,7 +261,7 @@ export function adapterAtPublishFor(
   persistedHandles: unknown[] = [],
   requestTimeoutMs?: number,
   persistHandle?: ClaudeStructuredSessionAdapterDeps['persistHandle'],
-  onBackgroundTasksChanged?: ClaudeStructuredSessionAdapterDeps['onBackgroundTasksChanged'],
+  onChildWorkEvidence?: ClaudeStructuredSessionAdapterDeps['onChildWorkEvidence'],
   onDispatchSettledLate?: ClaudeStructuredSessionAdapterDeps['onDispatchSettledLate']
 ): ClaudeStructuredSessionAdapter {
   return new ClaudeStructuredSessionAdapter({
@@ -285,7 +286,7 @@ export function adapterAtPublishFor(
       (async (handle) => {
         persistedHandles.push(handle)
       }),
-    ...(onBackgroundTasksChanged ? { onBackgroundTasksChanged } : {}),
+    ...(onChildWorkEvidence ? { onChildWorkEvidence } : {}),
     ...(onDispatchSettledLate ? { onDispatchSettledLate } : {})
   })
 }
@@ -323,4 +324,14 @@ export function recordingJournalSink(): StructuredAgentSessionEventSink {
 
 export function tick(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
+}
+
+/** Delivers one frame from Claude on `connection`, under the provider session it runs. */
+export function claudeFrame(connection: FakeConnection, message: Record<string, unknown>): void {
+  connection.handlers.onMessage?.({ session_id: PROVIDER_SESSION_ID, ...message })
+}
+
+/** Whether anything sent to Claude on `connection` carries `text`. */
+export function claudeWasSent(connection: FakeConnection, text: string): boolean {
+  return connection.sent.some((message) => JSON.stringify(message).includes(text))
 }

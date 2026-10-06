@@ -11,7 +11,7 @@ import { AGENT_JOURNAL_THREAD_SCOPE } from '../../../shared/agent-session-journa
 // leave the lease in a state an attach can claim, and these tests prove that by adjudicating it
 // rather than by reading fields off it.
 
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
@@ -31,8 +31,11 @@ import type {
   PersistedAgentSessionRecord,
   PersistedAgentSessionRuntimeKind
 } from '../../../shared/agent-session-legacy-handoff-lease'
-import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
-import { AGENT_SESSION_STORE_FILE_NAME } from '../../runtime/agent-session-record-store-file'
+import type { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
+import {
+  openTestAgentSessionRecordStore,
+  seedTestAgentSessionRecordStore
+} from '../../runtime/agent-session-record-store-test-harness'
 import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
 import { openAgentSessionJournal } from '../agent-session-journal/journal-store-factory'
 import { AgentSessionJournal } from '../agent-session-journal/journal-store'
@@ -47,6 +50,12 @@ import {
   resetHostTestOperationIds
 } from './structured-agent-session-host-test-data'
 import { openTestJournalHostDatabase } from '../agent-session-journal/journal-host-database-test-support'
+import { createStructuredAgentSessionLogger } from './structured-agent-session-logger'
+import {
+  claudeProviderHandle,
+  codexProviderHandle
+} from '../../../shared/agent-session-provider-handle-encoding'
+import { NO_STRUCTURED_AGENTS } from './structured-agent-session-adapter-router-test-support'
 
 const CALLER = { callerKey: 'client-1' }
 const DEAD_OWNER: AgentSessionProcessIdentity = {
@@ -111,26 +120,15 @@ function wedgedRecord(overrides: WedgeOverrides): PersistedAgentSessionRecord {
 }
 
 async function seedStore(record: PersistedAgentSessionRecord): Promise<void> {
-  const directory = join(root, 'store')
-  await mkdir(directory, { recursive: true })
-  await writeFile(
-    join(directory, AGENT_SESSION_STORE_FILE_NAME),
-    JSON.stringify({
-      schemaVersion: 2,
-      hostId: 'local',
-      records: { [record.sessionId]: record },
-      operations: {},
-      retiredClaimKeys: [],
-      unusableRecords: {}
-    }),
-    'utf-8'
-  )
-  store = await AgentSessionRecordStore.open({ directory, hostId: 'local' })
+  await seedTestAgentSessionRecordStore(root, { records: [record] })
+  store = await openTestAgentSessionRecordStore(root)
 }
 
 /** Every recorded owner in these fixtures is long gone; that is the present-time evidence. */
 function openHost(overrides: Partial<StructuredAgentSessionHostDeps> = {}): void {
   host = new StructuredAgentSessionHost({
+    agents: NO_STRUCTURED_AGENTS,
+    logger: createStructuredAgentSessionLogger(),
     store,
     adapter: {
       acquire,
@@ -167,7 +165,7 @@ beforeEach(async () => {
     },
     link: {
       linkId: `link-${fence}`,
-      handle: { provider: 'codex', threadId: THREAD },
+      handle: codexProviderHandle(THREAD),
       origin: 'resumed' as const,
       mintedAtFence: fence,
       observedAt: NOW
@@ -204,8 +202,8 @@ async function seedRunningTurn(provider: 'codex' | 'claude' = 'codex'): Promise<
       agent: provider,
       providerHandle:
         provider === 'codex'
-          ? { kind: 'codex', threadId: THREAD }
-          : { kind: 'claude', sessionId: 'provider-session-alpha-1', leafUuid: null }
+          ? codexProviderHandle(THREAD)
+          : claudeProviderHandle('provider-session-alpha-1', null)
     },
     database: openTestJournalHostDatabase(root)
   })
@@ -283,10 +281,7 @@ describe('already-wedged profiles become usable on load', () => {
       expect(acquire).not.toHaveBeenCalled()
 
       await host.flushAllStreamedEvents()
-      store = await AgentSessionRecordStore.open({
-        directory: join(root, 'store'),
-        hostId: 'local'
-      })
+      store = await openTestAgentSessionRecordStore(root)
       openHost()
       await host.restoreReadableSessions()
 
@@ -366,10 +361,10 @@ describe('already-wedged profiles become usable on load', () => {
       // What the sidebar reads: every status this restart published says the chat is not working.
       expect(published.filter((summary) => summary.sessionId === SESSION)).not.toEqual([])
       expect(published.map((summary) => summary.status)).not.toContain('working')
-      // A crash is not something the user did: no outcome is claimed, so no reader files it as a
-      // cancellation the user already knows about.
+      // A crash is not something the user did: a proven one reads as an interruption and an
+      // unprovable one as unconfirmed, so no reader files it as a cancellation the user knows about.
       expect(published.map((summary) => summary.turnOutcome)).toEqual(
-        published.map(() => undefined)
+        published.map(() => (verdict.state === 'interrupted' ? 'interruption' : 'unconfirmed'))
       )
     }
   )
@@ -615,7 +610,7 @@ describe('already-wedged profiles become usable on load', () => {
     // The conversation survived: the codex thread was resumed, not recreated.
     expect(store.getRecord(SESSION)?.providerHandleChain[0]).toMatchObject({
       linkId: 'codex-13-link',
-      handle: { threadId: THREAD }
+      handle: { nativeId: THREAD }
     })
     // Why NOT acquired here: startup spawning a provider child for every recovered record is the
     // accumulation this stack removed. Unlatching is the migration's job; spawning is a hold's.
@@ -690,7 +685,7 @@ describe('already-wedged profiles become usable on load', () => {
         process: { hostId: 'local', pid: 4242, processStartTimeMs: 1, spawnToken: 'spawn-new' },
         link: {
           linkId: `link-${fence}`,
-          handle: { provider: 'codex' as const, threadId: THREAD },
+          handle: codexProviderHandle(THREAD),
           origin: 'resumed' as const,
           mintedAtFence: fence,
           observedAt: NOW

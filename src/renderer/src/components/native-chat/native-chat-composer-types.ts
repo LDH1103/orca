@@ -9,6 +9,7 @@ import type {
 } from '../../../../shared/native-chat-session-options'
 import type { NativeChatLaunchDraft } from '@/lib/native-chat-launch-prompt'
 import type { NativeChatComposerImageAttachment } from './NativeChatComposerField'
+import type { NativeChatLocalCommandAnswer } from './use-native-chat-local-command-answer'
 
 export type NativeChatOptionPickerRequest = {
   id: string
@@ -38,11 +39,21 @@ export type NativeChatStructuredComposerTransport = {
   runtimeEnvironmentId: string | null
 }
 
+export type NativeChatOptimisticSendOutcome = {
+  /** The host refused the write: mark the echo "Message not sent". */
+  reject: (pendingId: string) => void
+  /** The write acknowledgment was lost: hold the echo, then flag it unconfirmed. */
+  holdUnconfirmed: (pendingId: string) => void
+}
+
 export type NativeChatComposerProps = {
   /** Tab hosting the agent; used to resolve the live ptyId + runtime settings. */
   terminalTabId: string
   /** Stable split-leaf identity; unlike a PTY id, this survives reconnects. */
   paneKey: string
+  /** Owner of the unsent draft; defaults to `paneKey`. A structured chat's is its conversation,
+   *  shared by every composer showing it. */
+  draftScopeKey?: string
   /** Specific split-pane PTY this chat view owns. */
   targetPtyId: string | null
   agent: AgentType
@@ -54,10 +65,15 @@ export type NativeChatComposerProps = {
   onStop?: () => void
   /** Render an optimistic echo until the real transcript turn lands. */
   onOptimisticSend?: (text: string, imagePaths?: string[]) => string | undefined
+  /** Settle an optimistic echo whose write was refused or never acknowledged. */
+  optimisticSendOutcome?: NativeChatOptimisticSendOutcome
   /** Remove an optimistic echo when its delayed submit is canceled. */
   onOptimisticSendCanceled?: (pendingId: string) => void
-  /** Record a dispatched slash command that does not create a chat turn. */
-  onSlashCommand?: (command: string) => void
+  /** Record a dispatched slash command that does not create a chat turn; `output`
+   *  carries the host's answer when the agent never saw the command. */
+  onSlashCommand?: (command: string, output?: string) => void
+  /** The host's own answer to a command the agent must not see, or null to send it. */
+  answerCommandLocally?: NativeChatLocalCommandAnswer
   /** Picker-only agent commands continue in the hosted TUI after dispatch. */
   onSwitchToTerminal?: () => void
   /** Reads the hosted TUI's current rendered screen when chat is entered. */
@@ -92,4 +108,6 @@ export type NativeChatComposerHandle = {
   }) => void
   /** Pastes clipboard content when no DOM paste event is available. */
   pasteFromClipboard: () => void
+  /** Whether a node is inside the composer's own input, not merely the chat pane. */
+  contains: (node: Node | null) => boolean
 }

@@ -124,7 +124,8 @@ function Harness({
     hostSupport: {
       promptCancel: promptCancelSupported,
       questionAnswers: questionAnswersSupported,
-      queuedMessages: false
+      queuedMessages: false,
+      quietRepeatedStop: false
     },
     onSendError: vi.fn()
   })
@@ -143,7 +144,8 @@ describe('mobile structured prompt cancellation', () => {
       fence: 3,
       items: [runningTurn(), pendingApproval()],
       submissions: [],
-      retainedItemLimit: 1024,
+      retainedOwnItemLimit: 1024,
+      retainedItemCap: 8192,
       hasOlder: false,
       status: 'ready'
     }

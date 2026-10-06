@@ -1,6 +1,6 @@
 import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
-import type { AgentSessionBackgroundTaskState } from '../../shared/agent-session-wire'
+import { claudeProviderHandle } from '../../shared/agent-session-provider-handle-encoding'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import type { ClaudeStructuredAuthPolicy } from '../claude-accounts/claude-structured-auth-policy'
 import { createClaudeStructuredLaunchResolver } from '../claude/claude-structured-launch-resolution'
@@ -13,10 +13,11 @@ import type { StructuredAgentSessionLifecycleEvent } from '../native-chat/agent-
 import type { ClaudeStructuredSessionEvent } from '../claude/claude-structured-session-state'
 import {
   recordAgentSessionProviderHandle,
-  reviseAgentSessionClaudeResumePoint
+  reviseAgentSessionProviderResumePoint
 } from './agent-session-provider-handle-transition'
 import type { ClaudeManagedAccountGateSettings } from '../native-chat/claude-structured-managed-account-support'
 import type { AgentSessionRecordStore } from './agent-session-record-store'
+import { ClaudeAtRestCommandCatalog } from '../claude/claude-at-rest-commands'
 
 export type StructuredClaudeRuntimeAdapterDeps = {
   store: AgentSessionRecordStore
@@ -35,13 +36,10 @@ export type StructuredClaudeRuntimeAdapterDeps = {
   readProcessStartTime?: ClaudeStructuredSessionAdapterDeps['readProcessStartTime']
   modelCatalog?: ClaudeStructuredSessionAdapterDeps['modelCatalog']
   onLifecycleEvent: (event: StructuredAgentSessionLifecycleEvent) => void
-  onBackgroundTasksChanged?: (
-    sessionId: string,
-    state: AgentSessionBackgroundTaskState | null
-  ) => void
   onDispatchSettledLate?: ClaudeStructuredSessionAdapterDeps['onDispatchSettledLate']
   onSessionIdle?: ClaudeStructuredSessionAdapterDeps['onSessionIdle']
   onChildWorkEvidence?: ClaudeStructuredSessionAdapterDeps['onChildWorkEvidence']
+  logger?: ClaudeStructuredSessionAdapterDeps['logger']
 }
 
 /** The adapter events the host's lifecycle handler consumes, in the host's vocabulary. */
@@ -51,9 +49,10 @@ export function structuredClaudeLifecycleEvent(
   if (event.type === 'started') {
     return event
   }
+  // Every exit of a child with an identity, expected or not: the host ends that child's record.
   if (
     event.type === 'ended' &&
-    event.cause === 'unexpected-exit' &&
+    event.cause !== undefined &&
     event.fence !== undefined &&
     event.acquisitionGeneration
   ) {
@@ -78,6 +77,9 @@ export function createStructuredClaudeRuntimeAdapter(
 ): ClaudeStructuredSessionAdapter {
   const { store } = deps
   return new ClaudeStructuredSessionAdapter({
+    atRestCommands: new ClaudeAtRestCommandCatalog({
+      resolveWorkspacePath: deps.resolveWorkspacePath
+    }),
     resolveLaunch: createClaudeStructuredLaunchResolver({
       store,
       resolveWorkspacePath: deps.resolveWorkspacePath,
@@ -114,11 +116,10 @@ export function createStructuredClaudeRuntimeAdapter(
     },
     persistResumePoint: async ({ sessionId, providerSessionId, leafUuid, fence }) => {
       await store.transitionHandoff(sessionId, (record: AgentSessionRecord) =>
-        reviseAgentSessionClaudeResumePoint({
+        reviseAgentSessionProviderResumePoint({
           record,
           fence,
-          providerSessionId,
-          leafUuid,
+          handle: claudeProviderHandle(providerSessionId, leafUuid),
           now: Date.now()
         })
       )
@@ -129,12 +130,10 @@ export function createStructuredClaudeRuntimeAdapter(
         deps.onLifecycleEvent(lifecycle)
       }
     },
-    ...(deps.onBackgroundTasksChanged
-      ? { onBackgroundTasksChanged: deps.onBackgroundTasksChanged }
-      : {}),
     ...(deps.onDispatchSettledLate ? { onDispatchSettledLate: deps.onDispatchSettledLate } : {}),
     ...(deps.onSessionIdle ? { onSessionIdle: deps.onSessionIdle } : {}),
     ...(deps.onChildWorkEvidence ? { onChildWorkEvidence: deps.onChildWorkEvidence } : {}),
+    ...(deps.logger ? { logger: deps.logger } : {}),
     ...(deps.openClaudeConnection ? { openConnection: deps.openClaudeConnection } : {}),
     ...(deps.readProcessStartTime ? { readProcessStartTime: deps.readProcessStartTime } : {}),
     ...(deps.modelCatalog ? { modelCatalog: deps.modelCatalog } : {})

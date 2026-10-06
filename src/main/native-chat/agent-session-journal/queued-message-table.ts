@@ -9,7 +9,15 @@
 
 import type Database from '../../sqlite/sync-database'
 import type { UnreadAgentSessionFailureFact } from '../../../shared/agent-session-failure'
-import type { AgentJournalMessageItem } from '../../../shared/agent-session-journal-types'
+import type {
+  AgentJournalCursor,
+  AgentJournalMessageItem
+} from '../../../shared/agent-session-journal-types'
+import {
+  readAgentSessionMessageSource,
+  serializeAgentSessionMessageSource,
+  type AgentSessionMessageSource
+} from '../../../shared/agent-session-message-source'
 import { rejectedDraftSettlement } from './journal-dispatch-settlement'
 import { readStoredRejectionFact } from './journal-dispatch-reducer'
 
@@ -50,10 +58,18 @@ export type QueuedMessageRow = {
    *  card, cleared when a withdrawal sends it back to waiting. Host-only; the published link is
    *  the submission's `queuedMessageId`. */
   consumedAs: string | null
+  /** The conversation /clear carried this card from; null for a card written here. What the
+   *  replacement's 'cleared' pause is derived from. */
+  carriedFrom: string | null
+  /** Where the journal stood when it was queued: a Stop's pause holds only cards queued before
+   *  it. Null on rows from builds before it was recorded, which read as queued before any Stop. */
+  queuedAt: AgentJournalCursor | null
+  /** Who it is from: the person, or another agent through Orca. */
+  source: AgentSessionMessageSource
 }
 
 const COLUMNS =
-  'session_id, message_id, position, body_json, fingerprint, created_at, host_instance, state, hold_reason, returned_reason, returned_rejection, settled_at, settled_by_op, consumed_as'
+  'session_id, message_id, position, body_json, fingerprint, created_at, host_instance, state, hold_reason, returned_reason, returned_rejection, settled_at, settled_by_op, consumed_as, carried_from, queued_epoch, queued_sequence, source_json'
 
 export function insertQueuedMessage(
   db: Database.Database,
@@ -63,6 +79,9 @@ export function insertQueuedMessage(
     body: AgentJournalMessageItem
     fingerprint: string
     hostInstance: string
+    carriedFrom?: string
+    queuedAt: AgentJournalCursor
+    source: AgentSessionMessageSource
     now: number
   }
 ): QueuedMessageRow {
@@ -73,7 +92,7 @@ export function insertQueuedMessage(
   const position = Number(highest?.p ?? 0) + 1
   db.prepare(
     `INSERT INTO queued_messages (${COLUMNS})
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', NULL, NULL, NULL, NULL, NULL, NULL)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?)`
   ).run(
     input.sessionId,
     input.messageId,
@@ -81,7 +100,11 @@ export function insertQueuedMessage(
     JSON.stringify(input.body),
     input.fingerprint,
     input.now,
-    input.hostInstance
+    input.hostInstance,
+    input.carriedFrom ?? null,
+    input.queuedAt.epoch,
+    input.queuedAt.sequence,
+    serializeAgentSessionMessageSource(input.source)
   )
   return {
     sessionId: input.sessionId,
@@ -97,7 +120,10 @@ export function insertQueuedMessage(
     returnedRejection: null,
     settledAt: null,
     settledByOp: null,
-    consumedAs: null
+    consumedAs: null,
+    carriedFrom: input.carriedFrom ?? null,
+    queuedAt: input.queuedAt,
+    source: input.source
   }
 }
 
@@ -276,6 +302,10 @@ function toStoredRow(row: unknown): QueuedMessageRow | null {
     settled_at: number | null
     settled_by_op: string | null
     consumed_as: string | null
+    carried_from: string | null
+    queued_epoch: string | null
+    queued_sequence: number | null
+    source_json: string | null
   }
   let body: AgentJournalMessageItem
   try {
@@ -309,8 +339,24 @@ function toStoredRow(row: unknown): QueuedMessageRow | null {
     returnedRejection: storedRejection(record.returned_rejection),
     settledAt: record.settled_at,
     settledByOp: record.settled_by_op,
-    consumedAs: record.consumed_as
+    consumedAs: record.consumed_as,
+    carriedFrom: record.carried_from,
+    queuedAt:
+      record.queued_epoch !== null && typeof record.queued_sequence === 'number'
+        ? { epoch: record.queued_epoch, sequence: record.queued_sequence }
+        : null,
+    source: storedSource(record.source_json)
   }
+}
+
+function storedSource(json: string | null): AgentSessionMessageSource {
+  let stored: unknown = null
+  try {
+    stored = json === null ? null : JSON.parse(json)
+  } catch {
+    // An unreadable value is read as no value; the source reader decides what that means.
+  }
+  return readAgentSessionMessageSource(stored)
 }
 
 function storedRejection(json: string | null): UnreadAgentSessionFailureFact | null {

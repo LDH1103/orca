@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { hardenExistingSecureFile, isUnreadableError } from '../../shared/secure-file'
 import { writeSecureJsonFileAsync } from '../../shared/secure-file-async-write'
+import { removeStaleDurableWriteTempFiles } from '../durable-file-write'
 import type { MobileNotificationEvent } from './runtime-mobile-notification-controller'
 
 export type DeliveredNotificationIdentity = {
@@ -12,6 +13,7 @@ export type DeliveredNotificationIdentity = {
 type RecordEntry = DeliveredNotificationIdentity & { dismissedThrough: number; expiresAt: number }
 const LIMIT = 4096
 const RETENTION_MS = 7 * 86400_000
+const STALE_WRITE_TEMP_AGE_MS = 86400_000
 
 export class MobileNotificationDismissalStore {
   private readonly path: string
@@ -21,6 +23,8 @@ export class MobileNotificationDismissalStore {
   private persistAgain = false
   constructor(userDataPath: string) {
     this.path = join(userDataPath, 'mobile-notification-dismissals.json')
+    // Why: a write killed between writeFile and rename (e.g. a hung icacls, #20497) orphans its temp forever.
+    void removeStaleDurableWriteTempFiles(this.path, { minimumAgeMs: STALE_WRITE_TEMP_AGE_MS })
     try {
       hardenExistingSecureFile(this.path)
       const value: unknown = JSON.parse(readFileSync(this.path, 'utf8'))

@@ -11,16 +11,32 @@ import {
   isAgentStatusHeldOpenByChildWork,
   mainAgentTurnInterrupted
 } from '../../../../shared/agent-lead-status-fold'
-import { mainAgentStatusEqual, agentSubagentsEqual } from '../../../../shared/agent-status-types'
+import type { AgentChildWorkView } from '../../../../shared/agent-status-child-work-view'
+import {
+  agentChildWorkViewsEqual,
+  decodeAgentChildWorkViews
+} from '../../../../shared/agent-status-child-work-view-wire'
+import {
+  agentSubagentsEqual,
+  mainAgentStatusEqual,
+  type AgentSubagentSnapshot
+} from '../../../../shared/agent-status-types'
+import { structuredChildWorkLegacySubagents } from '../../../../shared/structured-agent-session-child-work-legacy'
 import { structuredAgentSessionPaneKey } from '../../../../shared/structured-agent-session-projection'
 import { structuredAgentSessionAgentStatus } from '../../../../shared/structured-agent-session-agent-status'
 import {
   structuredAgentSessionDatedMainAgent,
   structuredAgentSessionRowStateStartedAt
 } from '../../../../shared/structured-agent-session-status-started-at'
-import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { agentMainAgentVerdict } from '../../../../shared/agent-main-agent-verdict'
+import { useStructuredAgentSessionLaunchLifecycle } from '@/lib/structured-agent-session-launch-registry'
+import { useStructuredAgentSessionLaunchFailedAt } from '@/lib/structured-agent-session-launch-failed-at'
 import { useAppStore } from '@/store'
-import { getActiveRuntimeTarget, type RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
+import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
+import {
+  structuredAgentSessionOwnerForTab,
+  structuredAgentSessionTargetForHost
+} from '@/runtime/structured-agent-session-owner'
 import { getStructuredAgentSessionStatusFeed } from '@/runtime/structured-agent-session-status-feed'
 import { getStructuredAgentSessionTabs, type StructuredTab } from './structured-agent-session-tabs'
 
@@ -47,57 +63,102 @@ export function useStructuredAgentSessionStatusSummary(
   return { summary, observation }
 }
 
-/** The host's child state, projected to stable primitives so journal updates do not re-render chat. */
-export function useStructuredAgentSessionHostExecution(
+/** Only the host's startup phase, so a chat re-renders when that changes, not on every status. */
+export function useStructuredAgentSessionHostExecutionPhase(
   sessionId: string,
   target: RuntimeClientTarget
-): {
-  phase: NonNullable<AgentSessionStatusSummary['hostExecutionPhase']> | null
-  childKey: string | number | null
-} {
+): NonNullable<AgentSessionStatusSummary['hostExecutionPhase']> | null {
   const feed = useMemo(() => getStructuredAgentSessionStatusFeed(target), [target])
   useEffect(() => feed.activate(), [feed])
-  const phase = useSyncExternalStore(
+  return useSyncExternalStore(
     feed.subscribe,
     () => feed.getSnapshot().get(sessionId)?.hostExecutionPhase ?? null,
     () => null
   )
-  const childKey = useSyncExternalStore(
-    feed.subscribe,
-    () => {
-      const child = feed.getSnapshot().get(sessionId)?.hostExecutionChild
-      return child?.generation ?? child?.fence ?? null
-    },
-    () => null
-  )
-  return { phase, childKey }
 }
 
-function projectStatus(
-  tab: StructuredTab,
-  summary: AgentSessionStatusSummary | null,
-  observation: 'live' | 'unverifiable'
-): void {
-  const paneKey = structuredAgentSessionPaneKey(tab.id, tab.entityId)
-  const store = useAppStore.getState()
-  // No persisted turn yet (or nothing known): the row shows no agent status at all.
-  if (!summary?.status) {
-    if (store.agentStatusByPaneKey?.[paneKey]) {
-      store.removeAgentStatus(paneKey)
-    }
-    return
+/** The host's child records for the row, and the legacy roster readers of `subagents` keep. A host
+ *  that publishes views is copied verbatim; only an older host's task list is converted here. */
+function childWorkFor(summary: AgentSessionStatusSummary): {
+  children?: AgentChildWorkView[]
+  subagents?: AgentSubagentSnapshot[]
+} {
+  const children = decodeAgentChildWorkViews(summary.children)
+  if (children) {
+    const subagents = structuredChildWorkLegacySubagents(children, summary.agent)
+    return { children, ...(subagents ? { subagents } : {}) }
   }
-  // Sidebar children are the agent-kind tasks, projected by the same code every
-  // child-work reader uses; a backgrounded shell never counts as a subagent.
   const subagents = summary.backgroundTasks
     ? projectAgentChildWorkLegacySubagents(
         summary.backgroundTasks.map(agentChildWorkProjectionCandidateFromBackgroundTask)
       )
     : undefined
+  return subagents ? { subagents } : {}
+}
+
+/** A start the host refused leaves it no session to publish, so the launch's own failure is the
+ *  row: the same failed verdict the host publishes for a send the agent's start refused. */
+function projectFailedStart(tab: StructuredTab, paneKey: string, failedAt: number): void {
+  const store = useAppStore.getState()
+  const current = store.agentStatusByPaneKey?.[paneKey]
+  if (
+    current?.state === 'done' &&
+    agentMainAgentVerdict(current) === 'failure' &&
+    current.updatedAt === failedAt &&
+    current.stateStartedAt === failedAt &&
+    current.agentType === tab.agentSessionAgent &&
+    current.terminalTitle === tab.label &&
+    current.tabId === tab.id &&
+    current.worktreeId === tab.worktreeId
+  ) {
+    return
+  }
+  const { state, mainAgent } = structuredAgentSessionAgentStatus({
+    status: 'idle',
+    turnOutcome: 'failure'
+  })
+  store.setAgentStatus(
+    paneKey,
+    {
+      state,
+      mainAgent: { ...mainAgent, stateStartedAt: failedAt },
+      interrupted: false,
+      prompt: '',
+      agentType: tab.agentSessionAgent,
+      sessionBoundary: false
+    },
+    tab.label,
+    // Dated by the failure, as a host row is by its journal: it ages the same, a restart does not
+    // refresh it, and it replaces whatever newer-dated row the pane key held.
+    { updatedAt: failedAt, allowOlderTimestamp: true, stateStartedAt: failedAt },
+    { tabId: tab.id, worktreeId: tab.worktreeId },
+    { terminalResumeEligible: false }
+  )
+}
+
+function projectStatus(
+  tab: StructuredTab,
+  summary: AgentSessionStatusSummary | null,
+  observation: 'live' | 'unverifiable',
+  /** When the launch failed; null while it has not. */
+  launchFailedAt: number | null
+): void {
+  const paneKey = structuredAgentSessionPaneKey(tab.id, tab.entityId)
+  const store = useAppStore.getState()
+  // No persisted turn yet (or nothing known): the row shows no agent status at all.
+  if (!summary?.status) {
+    if (launchFailedAt !== null) {
+      projectFailedStart(tab, paneKey, launchFailedAt)
+    } else if (store.agentStatusByPaneKey?.[paneKey]) {
+      store.removeAgentStatus(paneKey)
+    }
+    return
+  }
+  const { children, subagents } = childWorkFor(summary)
   // Shared with `worktree ps`, so the CLI and this row cannot disagree about one session.
   const agentStatus = structuredAgentSessionAgentStatus({
     status: summary.status,
-    backgroundTasks: summary.backgroundTasks,
+    childWork: children ?? summary.backgroundTasks,
     turnOutcome: summary.turnOutcome
   })
   const current = store.agentStatusByPaneKey?.[paneKey]
@@ -121,7 +182,9 @@ function projectStatus(
     ...(summary.toolName ? { toolName: summary.toolName } : {}),
     ...(summary.toolInput ? { toolInput: summary.toolInput } : {}),
     ...(summary.lastAssistantMessage ? { lastAssistantMessage: summary.lastAssistantMessage } : {}),
-    ...(subagents ? { subagents, subagentObservation: observation } : {}),
+    ...(subagents ? { subagents } : {}),
+    ...(children ? { children } : {}),
+    ...(subagents || children ? { subagentObservation: observation } : {}),
     sessionBoundary: false
   } as const
   if (
@@ -136,6 +199,7 @@ function projectStatus(
     current.toolInput === summary.toolInput &&
     current.lastAssistantMessage === summary.lastAssistantMessage &&
     agentSubagentsEqual(current.subagents, subagents) &&
+    agentChildWorkViewsEqual(current.children, children) &&
     current.subagentObservation === desired.subagentObservation &&
     current.sessionBoundary === desired.sessionBoundary &&
     current.updatedAt === summary.updatedAt &&
@@ -182,18 +246,35 @@ function projectStatus(
   )
 }
 
-function StructuredAgentSessionStatusProjection({ tab }: { tab: StructuredTab }): null {
-  const environmentId = useAppStore((state) =>
-    getRuntimeEnvironmentIdForWorktree(state, tab.worktreeId)
-  )
-  const target = useMemo(
-    () => getActiveRuntimeTarget({ activeRuntimeEnvironmentId: environmentId }),
-    [environmentId]
-  )
+/** Reads the chat's status from the host recorded on its tab; a chat no host can be named for has
+ *  none to read. */
+function StructuredAgentSessionStatusProjection({
+  tab
+}: {
+  tab: StructuredTab
+}): React.JSX.Element | null {
+  const owner = useAppStore((state) => structuredAgentSessionOwnerForTab(state, tab))
+  const target = useMemo(() => structuredAgentSessionTargetForHost(owner), [owner])
+  return target ? <StructuredAgentSessionOwnedStatusProjection tab={tab} target={target} /> : null
+}
+
+function StructuredAgentSessionOwnedStatusProjection({
+  tab,
+  target
+}: {
+  tab: StructuredTab
+  target: RuntimeClientTarget
+}): null {
   const { summary, observation } = useStructuredAgentSessionStatusSummary(tab.entityId, target)
+  const launchFailed =
+    useStructuredAgentSessionLaunchLifecycle(tab.worktreeId, tab.entityId) === 'failed'
+  const failedAt = useStructuredAgentSessionLaunchFailedAt(tab.entityId)
+  // Only records saved by older builds lack the time; the tab's creation precedes any
+  // acknowledgement of it, so a failure seen before then stays read.
+  const launchFailedAt = launchFailed ? (failedAt ?? tab.createdAt) : null
   useEffect(() => {
-    projectStatus(tab, summary, observation)
-  }, [summary, observation, tab])
+    projectStatus(tab, summary, observation, launchFailedAt)
+  }, [summary, observation, tab, launchFailedAt])
   useEffect(
     () => () =>
       useAppStore.getState().removeAgentStatus(structuredAgentSessionPaneKey(tab.id, tab.entityId)),

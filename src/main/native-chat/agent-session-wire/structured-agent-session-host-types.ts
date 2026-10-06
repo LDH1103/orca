@@ -2,19 +2,28 @@ import type { SubmissionRejectionFact } from '../../../shared/agent-session-fail
 import type { AgentSessionOwnerProbe } from '../../../shared/agent-session-lease-adjudication'
 import type { AgentJournalCursor } from '../../../shared/agent-session-journal-types'
 import type { AgentSessionRecord } from '../../../shared/agent-session-record'
-import type { AgentSessionStatusSummary } from '../../../shared/agent-session-wire'
+import type {
+  AgentSessionStatusSummary,
+  AgentSessionWireRefusal
+} from '../../../shared/agent-session-wire'
 import type { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import type { AgentSessionRecoveryCapsule } from '../../runtime/agent-session-recovery-capsule'
 import type { AgentSessionSpawnTokenScan } from '../../runtime/agent-session-spawn-token-process-scan'
 import type { JournalHostDatabase } from '../agent-session-journal/journal-host-database'
 import type { AgentSessionJournal } from '../agent-session-journal/journal-store'
+import type { JournalStopSettle } from '../agent-session-journal/queued-message-pause'
 import type {
   StructuredAgentSessionAdapter,
-  StructuredAgentSessionProviderChildPhase
+  StructuredAgentSessionChildEndCause,
+  StructuredAgentSessionProviderChildPhase,
+  StructuredAgentSessionStopCause
 } from './structured-agent-session-adapter'
 import type { AgentSessionAttachParams } from './structured-agent-session-attach'
 import type { StructuredAgentSessionStatusSink } from './structured-agent-session-status-feed'
 import type { AgentModelCatalogService } from '../agent-model-catalog/agent-model-catalog-service'
+import type { StructuredAgentSessionLogger } from './structured-agent-session-logger'
+import type { StructuredAgentRegistry } from './structured-agent-registry'
+import type { AgentSessionHandleProvider } from '../../../shared/agent-session-provider-handle'
 
 export type StructuredAgentSessionCaller = { callerKey: string }
 
@@ -25,14 +34,30 @@ export type StructuredAgentSessionCaller = { callerKey: string }
 export type StructuredAgentSessionReveal = {
   sessionId: string
   workspaceId: string
-  agent: 'claude' | 'codex'
+  agent: AgentSessionHandleProvider
   readable: boolean
+  /** Why the journal did not open, as a read would be refused. Host-side only: never published. */
+  openRefusal?: AgentSessionWireRefusal
 }
 
 /** Which provider child: the adapter acquisition and the lease fence it writes at. */
 export type StructuredAgentSessionProviderChildIdentity = {
   readonly generation: string | null
   readonly fence: number
+}
+
+/** The close a stop began for its child. It lives on the child and ends with it: once begun, the
+ *  child takes no input again, and every later stop, start or provider write joins it. */
+export type StructuredAgentSessionChildClose = {
+  /** The first stop's, which the child's end keeps however many asks join it. */
+  readonly cause: StructuredAgentSessionStopCause
+  readonly reason: string | null
+  /** The Stop event that stop wrote, folded before the work it ends is settled, with the settle a
+   *  person's close that named no turn opens; a repeated ask reopens it. */
+  recorded: Promise<JournalStopSettle | null>
+  /** Where the journal stood when that stop was asked for: the child's end is ordered there, so a
+   *  message accepted while the exit was being proven came after it. A repeated ask moves it. */
+  requestedAt: AgentJournalCursor
 }
 
 /** The provider process behind a conversation. Written only in
@@ -44,18 +69,14 @@ export type StructuredAgentSessionProviderChild = StructuredAgentSessionProvider
   /** The queued message whose delivery started this child, fixed when the start is made; absent
    *  for any other start. In memory only: it tells a restart offer its own start from another. */
   readonly startedFor?: string
+  close?: StructuredAgentSessionChildClose
 }
 
 /** What ending a child established about its provider root. A stop's comes only from
  *  `stopAgentSessionProviderRoot`; an observed exit's root is gone by definition. */
 export type StructuredAgentSessionStopVerdict = { rootGone: boolean }
 
-export type StructuredAgentSessionChildEndCause =
-  | 'user-stop'
-  | 'host-stop'
-  | 'exit'
-  | 'attach-failed'
-  | 'evict'
+export type { StructuredAgentSessionChildEndCause }
 
 /** How the conversation's last child ended. In memory only: the delivery loop reads it to tell a
  *  Stop from a failure. */
@@ -71,7 +92,7 @@ export type StructuredAgentSessionEndedChild = StructuredAgentSessionProviderChi
     duringStartup: boolean
     startedFor?: string
     /** Where the conversation's journal stood when the child ended, to order the end against a
-     *  message's acceptance. */
+     *  message's acceptance. A close's end stands where its stop was asked for. */
     endedAt: AgentJournalCursor
   }
 
@@ -84,16 +105,14 @@ export type StructuredAgentSessionHostSession = {
    *  has none — so it may not be evicted to free a child, nor have its lease released as an
    *  observed exit. */
   child: StructuredAgentSessionProviderChild | null
-  /** The wind-down this host still owes for a child it started: settling that generation's work
-   *  and handing the lease back. Outlives `child`, which ends the moment the adapter proves the
-   *  exit — an eviction that aborts after that point must still finish it on the next close. */
-  owesProviderChildWindDown?: StructuredAgentSessionProviderChildIdentity
   lastEndedChild?: StructuredAgentSessionEndedChild
 }
 
 export type StructuredAgentSessionHostDeps = {
   store: AgentSessionRecordStore
   adapter: StructuredAgentSessionAdapter
+  /** The agents this runtime drives; what each declares is read here, never from the adapter. */
+  agents: StructuredAgentRegistry
   /** Optional advisory recovery storage, independent of conversation backups. */
   recoveryCapsule?: AgentSessionRecoveryCapsule
   /** The host's one chat journal database. */
@@ -119,7 +138,9 @@ export type StructuredAgentSessionHostDeps = {
   idleSweep?: { intervalMs?: number; idleMs?: number }
   /** Whether an orchestration dispatch still owns this session's worker; absent answers no. */
   hasOpenDispatch?: (record: AgentSessionRecord) => boolean
-  onEventSinkError?: (input: { sessionId: string; error: unknown }) => void
+  /** Where every failure the host carries on past is reported. Required: a host without one would
+   *  drop exactly the failures nobody sees in the UI. */
+  logger: StructuredAgentSessionLogger
   /** Every status projection this host publishes. `replay` marks a re-projection of state the host
    *  already knew (restore, an arriving subscriber) rather than a fresh journal edge. */
   onSessionStatusChanged?: (

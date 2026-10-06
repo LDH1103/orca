@@ -19,9 +19,9 @@ import {
   resetNativeChatPtySendQueuesForTests,
   NATIVE_CHAT_SUBMIT_DELAY_MS,
   NATIVE_CHAT_QUESTION_STEP_MS,
-  NATIVE_CHAT_ADVANCE_BUFFER_MS,
-  NATIVE_CHAT_CLEAR_UNSUBMITTED_INPUT
+  NATIVE_CHAT_ADVANCE_BUFFER_MS
 } from './native-chat-runtime-send'
+import { NATIVE_CHAT_CLEAR_UNSUBMITTED_INPUT } from './native-chat-input-clear'
 import {
   NATIVE_CHAT_IMAGE_ATTACHMENT_SETTLE_MS,
   sendNativeChatMessageWithImageAttachments
@@ -336,6 +336,16 @@ describe('sendNativeChatMessageWithImageAttachments', () => {
   afterEach(() => {
     vi.useRealTimers()
     resetNativeChatPtySendQueuesForTests()
+  })
+
+  it('escapes a pasted image path with spaces, so an attachment agent sees one path', () => {
+    sendNativeChatMessageWithImageAttachments('codex', SETTINGS, PTY, '', [
+      '/Users/me/Library/Application Support/orca/native-chat-pastes/orca-paste-1-ab.png'
+    ])
+    expectWriteOrder(sendRuntimePtyInput.mock.calls, [
+      NATIVE_CHAT_CLEAR_UNSUBMITTED_INPUT,
+      '\x1b[200~/Users/me/Library/Application\\ Support/orca/native-chat-pastes/orca-paste-1-ab.png\x1b[201~'
+    ])
   })
 
   it.each(['', 'describe'])('separates every OMP image reference before %j', (text) => {

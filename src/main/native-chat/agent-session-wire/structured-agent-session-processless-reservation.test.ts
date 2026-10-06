@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { computeAgentSessionPayloadFingerprint } from '../../../shared/agent-session-mutation-envelope'
-import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
+import { openTestAgentSessionRecordStore } from '../../runtime/agent-session-record-store-test-harness'
 import {
   AgentSessionPreSpawnError,
   type StructuredAgentSessionAdapter
@@ -15,6 +15,8 @@ import {
 import { openTestAttachConversation } from './structured-agent-session-attach-test-conversation'
 import { performAttach } from './structured-agent-session-attach-flow'
 import { openTestJournalHostDatabase } from '../agent-session-journal/journal-host-database-test-support'
+import { createStructuredAgentSessionLogger } from './structured-agent-session-logger'
+import { codexProviderHandle } from '../../../shared/agent-session-provider-handle-encoding'
 
 const NOW = 1_800_000_000_000
 const SESSION = 'session-alpha'
@@ -68,10 +70,7 @@ function attachParams(
 describe('processless structured session reservation', () => {
   it('refuses an adapter that declares no create support before reserving a lease', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-unsupported-attach-'))
-    const store = await AgentSessionRecordStore.open({
-      directory: join(root, 'store'),
-      hostId: 'local'
-    })
+    const store = await openTestAgentSessionRecordStore(root)
     const reserveOwner = vi.spyOn(store, 'reserveOwner')
     const acquire = vi.fn<StructuredAgentSessionAdapter['acquire']>()
     const adapter = {
@@ -85,6 +84,7 @@ describe('processless structured session reservation', () => {
 
     await expect(
       performAttach({
+        logger: createStructuredAgentSessionLogger(),
         store,
         adapter,
         openConversation: openTestAttachConversation(openTestJournalHostDatabase(root!)),
@@ -109,22 +109,20 @@ describe('processless structured session reservation', () => {
 
   it('refuses a replay when adapter support drifts after durable reservation', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-replay-support-drift-'))
-    const store = await AgentSessionRecordStore.open({
-      directory: join(root, 'store'),
-      hostId: 'local'
-    })
+    const store = await openTestAgentSessionRecordStore(root)
     const supportsCreate = vi
       .fn<NonNullable<StructuredAgentSessionAdapter['supportsCreate']>>()
       .mockReturnValueOnce(true)
       .mockReturnValueOnce(true)
       .mockReturnValueOnce(false)
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the attach reaches only `supportsCreate` and `acquire` on this fake adapter.
     const adapter = {
       supportsCreate,
       acquire: vi.fn(async ({ fence, spawnToken }) => ({
         process: { hostId: 'local', pid: 4242, processStartTimeMs: NOW, spawnToken },
         link: {
           linkId: 'link-1',
-          handle: { provider: 'codex' as const, threadId: 'thread-1' },
+          handle: codexProviderHandle('thread-1'),
           origin: 'created' as const,
           mintedAtFence: fence,
           observedAt: NOW
@@ -132,6 +130,7 @@ describe('processless structured session reservation', () => {
       }))
     } as unknown as StructuredAgentSessionAdapter
     const input = {
+      logger: createStructuredAgentSessionLogger(),
       store,
       adapter,
       journalDatabase: openTestJournalHostDatabase(root),
@@ -159,10 +158,7 @@ describe('processless structured session reservation', () => {
 
   it('releases a new reservation when support drifts before acquisition', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-support-drift-reservation-'))
-    const store = await AgentSessionRecordStore.open({
-      directory: join(root, 'store'),
-      hostId: 'local'
-    })
+    const store = await openTestAgentSessionRecordStore(root)
     const supportsCreate = vi
       .fn<NonNullable<StructuredAgentSessionAdapter['supportsCreate']>>()
       .mockReturnValueOnce(true)
@@ -172,6 +168,7 @@ describe('processless structured session reservation', () => {
     const acquire = vi.fn<StructuredAgentSessionAdapter['acquire']>()
     const adapter = { supportsCreate, acquire } as unknown as StructuredAgentSessionAdapter
     const input = {
+      logger: createStructuredAgentSessionLogger(),
       store,
       adapter,
       journalDatabase: openTestJournalHostDatabase(root),
@@ -214,8 +211,7 @@ describe('processless structured session reservation', () => {
 
   it('settles a pre-spawn failure and its processless evidence in one durable transaction', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-processless-reservation-'))
-    const storeDir = join(root, 'store')
-    const store = await AgentSessionRecordStore.open({ directory: storeDir, hostId: 'local' })
+    const store = await openTestAgentSessionRecordStore(root)
     const adapter = {
       acquire: vi.fn(async () => {
         throw new AgentSessionPreSpawnError(new Error('workspace no longer exists'))
@@ -225,6 +221,7 @@ describe('processless structured session reservation', () => {
 
     await expect(
       performAttach({
+        logger: createStructuredAgentSessionLogger(),
         store,
         adapter,
         openConversation: openTestAttachConversation(openTestJournalHostDatabase(root!)),
@@ -253,7 +250,7 @@ describe('processless structured session reservation', () => {
     })
     expect(store.listOperationRows()[0]?.outcome).toMatchObject({ status: 'failed' })
 
-    const reopened = await AgentSessionRecordStore.open({ directory: storeDir, hostId: 'local' })
+    const reopened = await openTestAgentSessionRecordStore(root)
     await reopened.reconcileOnRestart({
       probe: async () => ({ outcome: 'indeterminate', reason: 'no owner to probe' }),
       now: NOW + 1
@@ -267,8 +264,8 @@ describe('processless structured session reservation', () => {
 
   it('does not rerun a settled pre-spawn failure and admits a fresh operation', async () => {
     root = await mkdtemp(join(tmpdir(), 'orca-processless-retry-'))
-    const storeDir = join(root, 'store')
-    const store = await AgentSessionRecordStore.open({ directory: storeDir, hostId: 'local' })
+    const store = await openTestAgentSessionRecordStore(root)
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the attach reaches only the members this fake adapter defines.
     const adapter = {
       acquire: vi
         .fn<StructuredAgentSessionAdapter['acquire']>()
@@ -282,7 +279,7 @@ describe('processless structured session reservation', () => {
           },
           link: {
             linkId: 'link-1',
-            handle: { provider: 'codex', threadId: 'thread-1' },
+            handle: codexProviderHandle('thread-1'),
             origin: 'created',
             mintedAtFence: fence,
             observedAt: NOW
@@ -291,6 +288,7 @@ describe('processless structured session reservation', () => {
       releaseAcquisition: vi.fn(async () => true)
     } as unknown as StructuredAgentSessionAdapter
     const input = {
+      logger: createStructuredAgentSessionLogger(),
       store,
       adapter,
       journalDatabase: openTestJournalHostDatabase(root),
