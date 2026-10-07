@@ -9,18 +9,12 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentJournalMessageItem } from '../../../shared/agent-session-journal-types'
 import {
-  USER_MESSAGE_SOURCE,
-  type AgentMessageSource
-} from '../../../shared/agent-session-message-source'
-import {
   QUEUED_MESSAGE_PAUSED_SEND_FAILED,
   type AgentSessionSendResult,
   type AgentSessionWireRefusal
 } from '../../../shared/agent-session-wire'
-import {
-  createStructuredAgentSessionOperationId,
-  structuredAgentSessionPayloadFingerprint
-} from '../../../shared/structured-agent-session-mutation'
+import { createStructuredAgentSessionOperationId } from '../../../shared/structured-agent-session-mutation'
+import { agentSessionSendBodyFingerprint } from '../../../shared/structured-agent-session-send-mutation'
 import { queuedSendAnswer } from './structured-agent-session-queued-send-answer'
 import { structuredAgentSessionSendBlock } from './structured-agent-session-send-preparation'
 import { isUnsettledQueuedMessage } from '../agent-session-journal/queued-message-table'
@@ -126,6 +120,27 @@ export function structuredQueueHold(input: {
   return null
 }
 
+/** The card the drain sends next, or null while anything holds the queue: the drain's own pick
+ *  through the one gate, so a client told this reads what the drain acts on. Live facts only; the
+ *  backlog is never a gate, so a lone draft drains. */
+export function nextStructuredQueuedMessage(input: {
+  journal: AgentSessionJournal
+  record: AgentSessionRecord | null
+  fence: number
+}): QueuedMessageRow | null {
+  const next = oldestActionableQueuedMessage(input.journal)
+  const { journal, fence } = input
+  // The gate's cheap `working` first: publication asks on every streamed frame, and the gate's
+  // prompt check walks the whole fold.
+  if (
+    next === null ||
+    isStructuredAgentSessionMainAgentWorking(journal.activeTurnId(), journal.submissions(), fence)
+  ) {
+    return null
+  }
+  return structuredQueueHold(input) === null ? next : null
+}
+
 /**
  * Whether a `queue-if-active` send becomes a draft: any queue hold short of
  * `blocked`, or an actionable draft already exists (FIFO backlog — an
@@ -149,16 +164,6 @@ export function shouldQueueStructuredAgentSessionSend(input: {
     return true
   }
   return oldestActionableQueuedMessage(input.journal) !== null
-}
-
-/** A draft's payload fingerprint in the session that will send it: the reducer
- *  aliases the provider's echo to the submission by recomputing exactly this. */
-export function queuedMessageFingerprint(sessionId: string, body: AgentJournalMessageItem): string {
-  return structuredAgentSessionPayloadFingerprint({
-    method: 'agentSession.send',
-    sessionId,
-    fields: { body }
-  })
 }
 
 /** The accept-side budget refusal, or null when the draft fits. */
@@ -195,10 +200,6 @@ export async function maybeQueueStructuredAgentSessionSend(
     envelope: { clientOperationId: string }
     body: AgentJournalMessageItem
     delivery?: 'queue-if-active'
-    /** A person's send at a chat surface; it outranks any `source`. */
-    userSend?: true
-    /** Who a host-side send is from. */
-    source?: AgentMessageSource
   }
 ): Promise<
   | { ok: true; value: AgentSessionSendResult }
@@ -238,9 +239,9 @@ export async function maybeQueueStructuredAgentSessionSend(
     {
       messageId: clientMessageId,
       body: params.body,
-      fingerprint: queuedMessageFingerprint(ctx.sessionId, params.body),
-      hostInstance: structuredAgentSessionHostInstance(),
-      source: params.userSend ? USER_MESSAGE_SOURCE : (params.source ?? USER_MESSAGE_SOURCE)
+      // In the session that will send it: the reducer aliases the provider's echo by exactly this.
+      fingerprint: agentSessionSendBodyFingerprint(ctx.sessionId, params.body),
+      hostInstance: structuredAgentSessionHostInstance()
     },
     ctx.operationReceipt
   )
@@ -271,11 +272,19 @@ export type QueuedMessageDrainDeps = {
  */
 export class StructuredAgentSessionQueuedMessageDrain {
   private readonly scheduled = new Set<string>()
+  private disposed = false
 
   constructor(private readonly deps: QueuedMessageDrainDeps) {}
 
+  /** Quit, with delivery: a hand-off made now could only be settled by the next process, so a
+   *  quit leaves the cards exactly as a crash does. Read by the step at its start, and again
+   *  right before it appends, since quit can land while it awaits. */
+  dispose(): void {
+    this.disposed = true
+  }
+
   schedule(sessionId: string): void {
-    const journal = this.deps.sessions.get(sessionId)?.journal
+    const journal = this.disposed ? undefined : this.deps.sessions.get(sessionId)?.journal
     if (!journal) {
       return
     }
@@ -319,7 +328,7 @@ export class StructuredAgentSessionQueuedMessageDrain {
 
   private async step(sessionId: string): Promise<void> {
     const session = this.deps.sessions.get(sessionId)
-    if (!session) {
+    if (this.disposed || !session) {
       return
     }
     const journal = session.journal
@@ -333,16 +342,11 @@ export class StructuredAgentSessionQueuedMessageDrain {
         })
       })
     }
-    const next = oldestActionableQueuedMessage(journal)
-    if (!next) {
-      return
-    }
-    const record = this.deps.getRecord(sessionId)
     const fence = this.deps.conversationFence(sessionId)
-    // Live facts only, through the one gate; the backlog is never a gate, so a
-    // lone draft drains. Whatever clears a hold publishes or commits, which
-    // re-derives this step.
-    if (structuredQueueHold({ journal, record, fence }) !== null) {
+    // Whatever clears a hold publishes or commits, which re-derives this step.
+    const record = this.deps.getRecord(sessionId)
+    const next = nextStructuredQueuedMessage({ journal, record, fence })
+    if (this.disposed || !next) {
       return
     }
     // Always a fresh id: the submission names its draft by `queuedMessageId`, never by id equality.
@@ -351,7 +355,7 @@ export class StructuredAgentSessionQueuedMessageDrain {
       await journal.appendSubmission(
         {
           clientMessageId: submissionId,
-          // The queue's own automatic send: it never ends a pause.
+          // The queue's own automatic send, never kept as a card by a restart or a close.
           origin: 'host',
           payloadFingerprint: next.fingerprint,
           body: next.body,

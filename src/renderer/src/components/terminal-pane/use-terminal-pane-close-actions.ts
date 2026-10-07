@@ -1,4 +1,5 @@
-import { useCallback, useImperativeHandle, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
+import { onActiveTerminalPaneCloseRequest } from './request-active-terminal-pane-close'
 import { useAppStore } from '../../store'
 import { retireUnboundRuntimeTerminalPane } from './retire-unbound-runtime-terminal-pane'
 import type { PaneExternalDropTarget } from '@/lib/pane-manager/pane-manager'
@@ -17,6 +18,7 @@ import type { TerminalPaneBindingController } from './use-terminal-pane-layout-b
 import { retireUnboundIpcTerminalPane } from './retire-unbound-ipc-terminal-pane'
 import { capturePendingTerminalPaneClose } from './terminal-pane-close-admission'
 import { commitTerminalSurfaceClose } from '@/store/terminals/terminal-surface-close-intent'
+import { noteAgentLaunchPaneClosedByUser } from '@/lib/agent-launch-pane-closes'
 
 export function useTerminalPaneCloseActions(controller: TerminalPaneBindingController) {
   const confirmedCloseRef = useRef<(() => void) | null>(null)
@@ -28,7 +30,6 @@ export function useTerminalPaneCloseActions(controller: TerminalPaneBindingContr
     paneTransportsRef,
     pendingCloseConfirmation,
     persistLayoutSnapshot,
-    ref,
     setPendingCloseConfirmation,
     setTerminalErrorsByPaneId,
     syncPanePtyLayoutBinding,
@@ -51,6 +52,13 @@ export function useTerminalPaneCloseActions(controller: TerminalPaneBindingContr
         clearSessionRestoredBannerForPane(paneId)
         const leafId = manager.getLeafId(paneId)
         if (leafId) {
+          const launchPane = useAppStore
+            .getState()
+            .tabsByWorktree[worktreeId]?.find((tab) => tab.id === tabId)?.agentLaunchPane
+          if (launchPane?.leafId === leafId && !launchPane.outcome) {
+            // The user closed a launch pane whose agent is still starting; main stops that launch.
+            noteAgentLaunchPaneClosedByUser(tabId, leafId)
+          }
           commitTerminalSurfaceClose(worktreeId, { kind: 'pane', tabId, leafId })
           retireUnboundIpcTerminalPane({
             getState: useAppStore.getState,
@@ -164,19 +172,17 @@ export function useTerminalPaneCloseActions(controller: TerminalPaneBindingContr
     [executeClosePane, getCloseDialogCopyKind]
   )
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      closeActivePane: (): void => {
-        const manager = managerRef.current
-        const pane = manager?.getActivePane() ?? manager?.getPanes()[0]
-        if (pane) {
-          handleRequestClosePane(pane.id)
-        }
-      }
-    }),
+  const closeActivePane = useCallback((): void => {
+    const manager = managerRef.current
+    const pane = manager?.getActivePane() ?? manager?.getPanes()[0]
+    if (pane) {
+      handleRequestClosePane(pane.id)
+    }
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- Preserve the pre-split dependency contract.
-    [handleRequestClosePane]
+  }, [handleRequestClosePane])
+  useEffect(
+    () => onActiveTerminalPaneCloseRequest(tabId, closeActivePane),
+    [closeActivePane, tabId]
   )
   const handleSearchSelectedText = useCallback((selectedText: string): void => {
     useAppStore.getState().showRightSidebarSearch({ query: selectedText })

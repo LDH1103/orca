@@ -1,3 +1,4 @@
+import { AGENT_HOOK_INFER_INTERRUPT_METHOD } from '../shared/agent-hook-interrupt-reconciliation'
 import { homedir } from 'node:os'
 import type { RelayDispatcher } from './dispatcher'
 import type { PtyEnvAugmenter, PtyHandler } from './pty-handler'
@@ -70,6 +71,9 @@ export class RelayAgentHookRuntime {
   }
 
   private registerPtyEnvironment(): void {
+    this.ptyHandler.setClaudeTerminalEvidenceListener((paneKey, evidence) => {
+      this.hookServer.claudeTerminalInterrupts.observe(paneKey, evidence)
+    })
     this.ptyHandler.setAgentPresenceTrigger((paneKey) => {
       void this.hookServer.checkAgentPresence(paneKey)
     })
@@ -187,6 +191,9 @@ export class RelayAgentHookRuntime {
   }
 
   private registerHandlers(): void {
+    this.dispatcher.onRequest(AGENT_HOOK_INFER_INTERRUPT_METHOD, async (params) => ({
+      applied: this.hookServer.inferInterrupt(params)
+    }))
     this.dispatcher.onRequest(AGENT_HOOK_REQUEST_REPLAY_METHOD, async () => ({
       replayed: this.hookServer.replayCachedPayloadsForPanes()
     }))

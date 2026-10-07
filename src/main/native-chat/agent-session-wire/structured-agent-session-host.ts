@@ -51,6 +51,7 @@ import {
 } from './structured-agent-session-restart-resume-host'
 import { structuredAgentSessionRestartResumeSurfaces } from './structured-agent-session-restart-resume-wiring'
 import { createStructuredAgentSessionConversationDelivery } from './structured-agent-session-host-delivery'
+import type * as conversation from './structured-agent-session-host-delivery'
 import { structuredAgentSessionConversationFence } from './structured-agent-session-provider-child'
 import { wireStructuredAgentSessionQueuedMessages } from './structured-agent-session-queued-wiring'
 import * as sessionLogger from './structured-agent-session-logger'
@@ -66,6 +67,7 @@ export class StructuredAgentSessionHost {
       this.subscribers.publish(sessionId, journal)
       this.conversationDelivery.afterCommit(sessionId, journal)
     },
+    deliverSettleEdge: (id, journal) => this.conversationDelivery.afterSettleEdge(id, journal),
     logger: sessionLogger.deferredStructuredAgentSessionLogger(() => this.deps.logger),
     onOpened: (sessionId) => this.queued.drain.schedule(sessionId),
     now: () => this.now()
@@ -80,19 +82,16 @@ export class StructuredAgentSessionHost {
     () => this.deps,
     (sessionId) => this.queued.onJournalActivity(sessionId),
     (sessionId) => this.restartResume.onAgentStarted(sessionId),
-    (sessionId) => this.backgroundTasks.publish(sessionId)
+    (sessionId) => this.backgroundTasks.publish(sessionId),
+    (sessionId) => this.backgroundTasks.read(sessionId)
   )
   private readonly subscribers = this.clientDelivery.subscribers
   private readonly tasks = new StructuredAgentSessionTaskQueue()
   private readonly runtimeState: StructuredAgentSessionHostRuntimeState
-  private readonly reconcileLeases: (
-    sessionId: string
-  ) => Promise<SessionWire.AgentSessionWireRefusal | null>
+  private readonly reconcileLeases: ReturnType<typeof createRestartReconciler>
   private readonly restore: ReturnType<typeof createStructuredAgentSessionHostRestore>
   private readonly lifetime: StructuredAgentSessionConversationLifetime
-  private readonly conversationDelivery: ReturnType<
-    typeof createStructuredAgentSessionConversationDelivery
-  >
+  private readonly conversationDelivery: conversation.StructuredAgentSessionConversationDelivery
   private readonly eventRecovery: StructuredAgentSessionEventRecovery
   private readonly backgroundTasks: StructuredAgentSessionBackgroundTaskChannel
   /** Public because the RPC surface addresses it directly; see the restart-resume collaborator. */
@@ -109,8 +108,8 @@ export class StructuredAgentSessionHost {
       (sessionId) => this.lifetime.conversation(sessionId),
       this.clientDelivery.readChildWork
     )
-    this.runtimeState = new StructuredAgentSessionHostRuntimeState(deps, (sessionId, error) =>
-      this.eventRecovery.recoverAfterSinkFailure(sessionId, error)
+    this.runtimeState = new StructuredAgentSessionHostRuntimeState(deps, this.sessions, (id, e) =>
+      this.eventRecovery.recoverAfterSinkFailure(id, e)
     )
     this.reconcileLeases = createRestartReconciler({
       store: deps.store,
@@ -212,6 +211,17 @@ export class StructuredAgentSessionHost {
   supportsCreate = (location: AgentSessionExecutionLocation, agent: string): boolean =>
     providerSupport.adapterSupportsCreate(this.deps.adapter, location, agent)
 
+  /** Every agent this runtime registered: what `agentSession.agents` publishes. */
+  agentDefinitions = () => this.deps.agents.definitions()
+
+  /** Saved chats can outlive their registration; both vocabularies bound a client's audience. */
+  knownAgentIds = (): readonly string[] => [
+    ...new Set([
+      ...this.deps.agents.definitions().map(({ agent }) => agent),
+      ...this.deps.store.listRecords().map(({ provider }) => provider)
+    ])
+  ]
+
   private readonly tabs = sessionTabs.createStructuredAgentSessionTabSurface(
     this,
     this.sessions,
@@ -222,6 +232,7 @@ export class StructuredAgentSessionHost {
   getSessionTabId = this.tabs.getSessionTabId
   showSessionTabs = this.tabs.showSessionTabs
   setSessionTabVisibility = this.tabs.setSessionTabVisibility
+  notifySessionTabHidden = this.tabs.notifySessionTabHidden
   /** The records file could not be read this launch, so chats it holds are not listed yet. */
   legacyRecordImportOwed = (): boolean => this.deps.journalDatabase.legacyRecordImportOwed === true
   /** This runtime holds a chat: a record, or the records file's chats still owed their copy. */
@@ -241,19 +252,21 @@ export class StructuredAgentSessionHost {
 
   attach(
     caller: StructuredAgentSessionCaller,
-    params: AgentSessionAttachParams
+    params: AgentSessionAttachParams,
+    options?: Parameters<typeof attachStructuredAgentSession>[3]
   ): Promise<SessionWire.AgentSessionMutationResult<SessionWire.AgentSessionAttachResult>> {
-    return attachStructuredAgentSession(this.attachContext(), caller.callerKey, params)
+    return attachStructuredAgentSession(this.attachContext(), caller.callerKey, params, options)
   }
 
   /** Test barrier: every write has landed by its call's return, so no production path needs it. */
-  flushStreamedEvents = (sessionId: string): Promise<void> =>
-    this.runtimeState.flushEventSink(sessionId)
+  flushStreamedEvents = (id: string): Promise<void> => this.runtimeState.flushEventSink(id)
 
   // Trigger inlined rather than imported: `AgentSessionResumeTrigger` in shared is the canonical
   // type, and this file has no line budget left for the import.
-  /** Quit: no exit or recovery settled after this starts a child or hands a message over. */
-  stopDelivery = (): void => this.conversationDelivery.dispose()
+  /** Quit: no exit or recovery settled after this starts a child or hands a message over, and the
+   *  queue hands no card over. */
+  stopDelivery = (): void =>
+    [this.conversationDelivery, this.queued.drain].forEach((d) => d.dispose())
 
   async flushAllStreamedEvents(options?: { trigger?: 'quit' | 'update' }): Promise<void> {
     this.stopDelivery()
@@ -339,8 +352,9 @@ export class StructuredAgentSessionHost {
   /** Every session's projected status for session lists; unlike `subscribe`, retains nothing. */
   subscribeStatus = this.clientDelivery.subscribeStatus
 
-  /** Turns that settle from now on. Live-only: nothing missed is replayed. */
+  /** Turns that settle, and prompts raised, from now on. Live-only: nothing missed is replayed. */
   subscribeTurnCompletions = this.clientDelivery.subscribeTurnCompletions
+  readStatusSummary = this.clientDelivery.readStatusSummary
 
   /** Test rigs only: the collaborators the host builds itself, typed, for tests that drive them. */
   collaboratorsForTests = () => ({

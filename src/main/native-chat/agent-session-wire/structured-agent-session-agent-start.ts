@@ -7,8 +7,10 @@
 
 import {
   providerDiagnosticOf,
+  type AgentSessionArgumentProblem,
   type ProviderDiagnostic
 } from '../../../shared/agent-session-failure'
+import { argumentProblemOf } from '../structured-agent-arguments-error'
 import {
   agentSessionRefusalFromReference,
   readAgentSessionRefusalReference,
@@ -27,7 +29,7 @@ import { terminalOwnerRefusalMessage } from '../../../shared/agent-session-legac
 import type { StructuredAgentSessionAttachContext } from './structured-agent-session-attach-context'
 import { attachStructuredAgentSessionUnderSerialize } from './structured-agent-session-attach-orchestration'
 import { failedCreateRefusal } from './structured-agent-session-failed-create-refusal'
-import { adapterSupportsRecord } from './structured-agent-session-provider-support'
+import { hostCanStartRecord } from './structured-agent-session-provider-support'
 import {
   joinClosingStructuredAgentSessionChild,
   releaseLeaseOfEndedStructuredAgentSessionChild
@@ -48,6 +50,7 @@ export type StructuredAgentSessionResumeOutcome =
       /** What the provider said about the failed start, for the chat's own record; host-side
        *  only, never on the refusal. */
       diagnostic?: ProviderDiagnostic
+      argumentProblem?: AgentSessionArgumentProblem
     }
 
 /** The attach's caller key: the ledger row a start settles is Orca's own. */
@@ -130,7 +133,7 @@ async function startStructuredAgentSessionAgent(
       'No structured session exists by that id.'
     )
   }
-  if (!adapterSupportsRecord(context.deps.adapter, record)) {
+  if (!hostCanStartRecord(context.deps, record)) {
     return refuseResume(
       'structured_agent_session_unsupported',
       { reason: 'hostUnsupported' },
@@ -193,7 +196,13 @@ function withDiagnostic(
   error: unknown
 ): StructuredAgentSessionResumeOutcome {
   const diagnostic = providerDiagnosticOf(error)
-  return { ok: false, refusal, ...(diagnostic ? { diagnostic } : {}) }
+  const argumentProblem = argumentProblemOf(error)
+  return {
+    ok: false,
+    refusal,
+    ...(diagnostic ? { diagnostic } : {}),
+    ...(argumentProblem ? { argumentProblem } : {})
+  }
 }
 
 function settledResumeRefusal(

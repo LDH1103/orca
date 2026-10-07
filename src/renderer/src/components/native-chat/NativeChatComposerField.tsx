@@ -10,13 +10,22 @@ import type { ComposerAutocomplete, NativeChatPickerItem } from './native-chat-c
 import { NativeChatMentionHint, NativeChatPickerMenu } from './NativeChatAutocompleteMenus'
 import { NativeChatComposerActions } from './NativeChatComposerActions'
 import type { NativeChatContextUsageSummary } from './native-chat-context-usage-summary'
-import { nativeChatComposerPlaceholder } from './native-chat-composer-target'
+import {
+  nativeChatComposerPlaceholder,
+  type NativeChatAfterStopSend
+} from './native-chat-composer-target'
 import type {
   SessionOptionDescriptor,
   SessionOptionsSurface
 } from '../../../../shared/native-chat-session-options'
 import type { NativeChatOptionPickerRequest } from './native-chat-composer-types'
+import {
+  nativeChatComposerPrimaryButton,
+  type NativeChatQueueResume
+} from './native-chat-composer-primary-action'
 import { NativeChatImageAttachmentPreview } from './NativeChatImageAttachmentPreview'
+import { NativeChatQueueSendConfirmDialog } from './NativeChatQueueSendConfirmDialog'
+import type { NativeChatQueueSendConfirm } from './use-native-chat-held-queue-composer-send'
 import type { NativeChatComposerGoalMode } from './use-native-chat-composer-submit'
 import { translate } from '@/i18n/i18n'
 import { useNativeChatComposerDraftUnsaved } from './use-native-chat-draft-unsaved'
@@ -40,6 +49,11 @@ export type NativeChatComposerFieldProps = {
   /** Why the send button is disabled, when the user can do something about it. */
   sendBlockedReason?: string | null
   isWorking: boolean
+  /** This client's Stop request is in flight: the Stop control is disabled and says so. */
+  isStopping?: boolean
+  /** The chat reads Stopping: the placeholder says a message runs after the stop, queued as a
+   *  card where the host holds sends as cards (`queue`), else sent and held by the host (`send`). */
+  afterStop?: NativeChatAfterStopSend
   attachDisabled: boolean
   dictationDisabled: boolean
   isDictating: boolean
@@ -61,6 +75,8 @@ export type NativeChatComposerFieldProps = {
   onDictationHoldEnd: () => void
   onSend: () => void
   onStop?: () => void
+  queueResume?: NativeChatQueueResume | undefined
+  queueSendConfirm?: NativeChatQueueSendConfirm | null
   sessionOptionsSurface: SessionOptionsSurface | null
   sessionOptionsSnapshot: SessionOptionDescriptor[]
   contextUsage?: NativeChatContextUsageSummary | null
@@ -118,6 +134,8 @@ export function NativeChatComposerField({
   sendButtonDisabled,
   sendBlockedReason,
   isWorking,
+  isStopping = false,
+  afterStop,
   attachDisabled,
   dictationDisabled,
   isDictating,
@@ -139,6 +157,8 @@ export function NativeChatComposerField({
   onDictationHoldEnd,
   onSend,
   onStop,
+  queueResume,
+  queueSendConfirm = null,
   sessionOptionsSurface,
   sessionOptionsSnapshot,
   contextUsage,
@@ -176,6 +196,20 @@ export function NativeChatComposerField({
       element.value = imeComposedSegment(compositionBaseRef.current, element.value)
     }
     onImeSettled(element)
+  }
+
+  const primary = nativeChatComposerPrimaryButton({
+    isWorking,
+    composerEmpty: draft.trim() === '' && imageAttachments.length === 0,
+    queueResume,
+    composerDisabled: disabled,
+    sendDisabled: sendButtonDisabled
+  })
+  const { resume } = primary
+  // The button disables while resuming, which drops its focus; typing is what comes next.
+  const resumeQueue = (): void => {
+    resume?.()
+    textareaRef.current?.focus()
   }
 
   return (
@@ -277,7 +311,7 @@ export function NativeChatComposerField({
                       'components.native-chat.goal.placeholder',
                       'Describe your goal, define measurable outcomes for best results'
                     )
-                  : nativeChatComposerPlaceholder(hasPty, canSend)
+                  : nativeChatComposerPlaceholder(hasPty, canSend, afterStop)
               }
               // Why: coarse-pointer min-height follows the app's touch target convention.
               // Editable content grows naturally; the 8lh cap (plus
@@ -294,10 +328,12 @@ export function NativeChatComposerField({
               <NativeChatComposerActions
                 attachDisabled={attachDisabled}
                 dictationDisabled={dictationDisabled}
-                sendDisabled={sendButtonDisabled}
+                sendDisabled={primary.disabled}
+                primaryAction={primary.action}
                 sendBlockedReason={sendBlockedReason}
                 draftNotSaved={draftNotSaved}
                 isWorking={isWorking}
+                isStopping={isStopping}
                 isDictating={isDictating}
                 isDictationHoldMode={isDictationHoldMode}
                 onAttach={onAttach}
@@ -306,6 +342,7 @@ export function NativeChatComposerField({
                 onDictationHoldEnd={onDictationHoldEnd}
                 onSend={onSend}
                 onStop={onStop}
+                {...(resume ? { onResume: resumeQueue } : {})}
                 sessionOptionsSurface={sessionOptionsSurface}
                 sessionOptionsSnapshot={sessionOptionsSnapshot}
                 contextUsage={contextUsage}
@@ -316,6 +353,10 @@ export function NativeChatComposerField({
           </div>
         </div>
       </div>
+      <NativeChatQueueSendConfirmDialog
+        confirm={queueSendConfirm}
+        focusComposer={() => textareaRef.current?.focus()}
+      />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -90,4 +90,104 @@ it('retries a failed write with the latest entries on the next record', async ()
   h.store.record({ type: 'dismiss', ...shown, notificationId: 'other' })
   await h.store.flush()
   expect(new MobileNotificationDismissalStore(h.path).reconcile([shown])).toEqual([shown])
+})
+it('names the live deliveries a subject can still retire, across a restart', async () => {
+  const h = fixture()
+  const keyed = (notificationId: string, notificationSeq: number) => ({
+    ...alert,
+    notificationId,
+    notificationEpoch: 'e',
+    notificationSeq
+  })
+  h.store.record(keyed('subject:prompt:a1', 1))
+  h.store.record(keyed('subject:prompt:a10', 2))
+  h.store.record(keyed('other:prompt:a1', 3))
+  h.store.record({
+    type: 'dismiss',
+    notificationId: 'subject:prompt:a10',
+    notificationEpoch: 'e',
+    notificationSeq: 4
+  })
+  await h.store.flush()
+  const restarted = new MobileNotificationDismissalStore(h.path)
+  expect(restarted.liveDeliveries('subject:').map((entry) => entry.notificationId)).toEqual([
+    'subject:prompt:a1'
+  ])
+})
+
+it('keeps a record whose origin a newer build wrote, losing only that origin', () => {
+  const h = fixture()
+  const origin = {
+    scope: {
+      executionHostId: 'runtime:h',
+      wslDistro: null,
+      workspaceId: 'w',
+      workspaceKind: 'folder'
+    },
+    sessionId: 's',
+    journalCursor: { epoch: 'j', sequence: 3 }
+  }
+  const entry = { ...shown, dismissedThrough: -1, expiresAt: Date.now() + 86400_000 }
+  writeFileSync(
+    join(h.path, 'mobile-notification-dismissals.json'),
+    JSON.stringify([
+      {
+        ...entry,
+        structuredOrigin: { ...origin, cause: { kind: 'subagent-prompt', promptId: 'p' } }
+      },
+      {
+        ...entry,
+        notificationId: 'known',
+        structuredOrigin: { ...origin, cause: { kind: 'prompt', promptId: 'p' } }
+      }
+    ])
+  )
+  expect(new MobileNotificationDismissalStore(h.path).liveDeliveries()).toEqual([
+    shown,
+    expect.objectContaining({ notificationId: 'known', structuredOrigin: expect.anything() })
+  ])
+})
+
+it('retains in-memory delivery and retirement when durable writes fail', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const h = fixture()
+  mkdirSync(join(h.path, 'mobile-notification-dismissals.json'))
+  h.store.record({ ...alert, ...shown })
+  await h.store.flush()
+  expect(warn).toHaveBeenCalledWith('[notifications] Could not persist dismissal recovery state')
+  expect(h.store.liveDeliveries(shown.notificationId)).toHaveLength(1)
+  warn.mockClear()
+  h.store.record({
+    type: 'dismiss',
+    notificationId: shown.notificationId,
+    notificationEpoch: 'current',
+    notificationSeq: 1,
+    dismissedDelivery: shown
+  })
+  await h.store.flush()
+  expect(warn).toHaveBeenCalledWith('[notifications] Could not persist dismissal recovery state')
+  expect(h.store.liveDeliveries(shown.notificationId)).toEqual([])
+  expect(h.store.reconcile([shown])).toEqual([shown])
+})
+
+it('a targeted old delivery cannot retire a newer replacement with the same logical id', async () => {
+  const h = fixture()
+  h.store.record({ ...alert, ...shown })
+  h.store.record({ ...alert, ...shown, notificationSeq: shown.notificationSeq + 1 })
+  h.store.record({ ...alert, ...shown, notificationEpoch: 'different' })
+  h.store.record({
+    type: 'dismiss',
+    notificationId: shown.notificationId,
+    notificationEpoch: 'current',
+    notificationSeq: 1,
+    dismissedDelivery: shown
+  })
+  expect(
+    h.store.liveDeliveries().map((record) => [record.notificationEpoch, record.notificationSeq])
+  ).toEqual([
+    ['old', 13],
+    ['different', 12]
+  ])
+  expect(h.store.reconcile([shown, { ...shown, notificationSeq: 13 }])).toEqual([shown])
+  await h.store.flush()
 })
