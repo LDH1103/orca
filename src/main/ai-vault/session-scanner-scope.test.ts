@@ -34,7 +34,6 @@ function scopedScanOptions(claudeProjectsDir: string, extra: Partial<AiVaultScan
     droidSessionsDir: '/nonexistent/droid',
     droidProjectsDir: '/nonexistent/droid-projects',
     kimiSessionsDir: '/nonexistent/kimi',
-    kiroSessionsDir: '/nonexistent/kiro',
     ...extra
   } satisfies AiVaultScanOptions
 }

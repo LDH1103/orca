@@ -74,7 +74,6 @@ test.each(['qoder', 'jcode'] as const)(
         query: 'proof',
         limit: 20,
         filters: {
-          // Kiro postdates both flags, so only an explicit supportedAgents list proves it.
           agents: AI_VAULT_AGENTS.filter((candidate) =>
             agent === 'qoder'
               ? !['jcode', 'kiro'].includes(candidate)

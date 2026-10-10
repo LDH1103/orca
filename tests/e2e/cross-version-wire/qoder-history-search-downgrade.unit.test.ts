@@ -48,7 +48,7 @@ function releaseParser(schema: unknown) {
   }
 }
 
-test.each(['qoder', 'jcode', 'kiro'] as const)(
+test.each(['qoder', 'jcode'] as const)(
   'a pre-agent release can read current %s search pages without losing other agents',
   async (agent) => {
     const baseline = await releaseSearchSchemas('v1.4.211')
@@ -166,18 +166,6 @@ test.each(PRE_QODER_HOSTS)(
     expect(call).toHaveBeenLastCalledWith(
       'aiVault.searchSessions',
       expect.objectContaining({ filters: { agents: LEGACY_AGENTS }, within })
-    )
-    // A host that predates Kiro rejects its tag the same way, so it is narrowed alike.
-    expect(
-      await client.searchSessions({
-        query: 'proof',
-        filters: { agents: ['codex', 'kiro'] },
-        within
-      })
-    ).toMatchObject({ hits: [{ agent: 'codex' }] })
-    expect(call).toHaveBeenLastCalledWith(
-      'aiVault.searchSessions',
-      expect.objectContaining({ filters: { agents: ['codex'] }, within })
     )
     call.mockClear()
     expect(

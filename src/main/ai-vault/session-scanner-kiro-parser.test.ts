@@ -1,157 +1,121 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { parseKiroSessionFile } from './session-scanner-kiro-parser'
-import { isKiroSessionManifestPath } from './session-scanner-kiro-paths'
-import type { FileWithMtime } from './session-scanner-types'
+import {
+  isKiroSessionMetadataPath,
+  kiroTranscriptPathForMetadata,
+  parseKiroSessionContent,
+  parseKiroSessionFile
+} from './session-scanner-kiro-parser'
 
-let tempDirs: string[] = []
+const SESSION_ID = '0b5e1c2a-3d4f-4a5b-8c6d-7e8f9a0b1c2d'
+
+const metadata = (extra: Record<string, unknown> = {}): string =>
+  JSON.stringify({
+    session_id: SESSION_ID,
+    cwd: '/tmp/kiro',
+    created_at: '2026-05-01T10:13:00.123456789Z',
+    updated_at: '2026-05-01T10:13:05.000000000Z',
+    title: 'Fix the login bug',
+    session_state: { rts_model_state: { model_info: { model_id: 'claude-opus-5' } } },
+    ...extra
+  })
+
+const prompt = JSON.stringify({
+  version: 'v1',
+  kind: 'Prompt',
+  data: { content: [{ kind: 'text', data: 'Fix the login bug' }], meta: { timestamp: 1777630381 } }
+})
+const reply = JSON.stringify({
+  version: 'v1',
+  kind: 'AssistantMessage',
+  data: { content: [{ kind: 'text', data: 'Fixed it.' }] }
+})
+
+const fileAt = (path: string) => ({ path, mtimeMs: 1, modifiedAt: new Date(1).toISOString() })
+
+let root: string | null = null
 
 afterEach(async () => {
-  await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })))
-  tempDirs = []
+  if (root) {
+    await rm(root, { recursive: true, force: true })
+    root = null
+  }
 })
 
-const SESSION_ID = 'sess_dc17e658-cf15-4822-80df-0f356f21879a'
-
-// Mirrors the session.json kiro-cli 2.27.0 writes for a V3 `work` session.
-const MANIFEST = {
-  schemaVersion: '1',
-  id: SESSION_ID,
-  title: 'Execute PowerShell Sleep Command',
-  agentMode: 'work',
-  workspacePaths: ['/private/tmp/kiro-test-proj'],
-  createdAt: '2026-10-02T16:04:12.112Z',
-  lastModifiedAt: '2026-10-02T16:04:35.400Z',
-  modelId: 'claude-opus-5.5'
+async function writeSession(meta: string, transcript?: string): Promise<string> {
+  root = await mkdtemp(join(tmpdir(), 'orca-kiro-sessions-'))
+  const path = join(root, `${SESSION_ID}.json`)
+  await writeFile(path, meta)
+  if (transcript !== undefined) {
+    await writeFile(kiroTranscriptPathForMetadata(path), transcript)
+  }
+  return path
 }
 
-// Mirrors messages.jsonl: one record per line with the turn content under `payload`.
-const MESSAGE_LINES = [
-  { id: 'm1', timestamp: '2026-10-02T16:04:12.200Z', payload: { type: 'session_start' } },
-  {
-    id: 'm2',
-    timestamp: '2026-10-02T16:04:12.300Z',
-    payload: { type: 'user', content: 'Run the shell command: echo dev-ok', images: [] }
-  },
-  {
-    id: 'm3',
-    timestamp: '2026-10-02T16:04:13.000Z',
-    payload: { type: 'assistant', operationType: 'Reasoning', content: 'thinking about it' }
-  },
-  {
-    id: 'm4',
-    timestamp: '2026-10-02T16:04:14.000Z',
-    payload: { type: 'tool_call', executionId: 'e1' }
-  },
-  {
-    id: 'm5',
-    timestamp: '2026-10-02T16:04:30.000Z',
-    payload: { type: 'assistant', operationType: 'Say', content: 'done' }
-  },
-  {
-    id: 'm6',
-    timestamp: '2026-10-02T16:04:31.000Z',
-    payload: { type: 'assistant', operationType: 'Summary', content: 'conversation summary' }
-  }
-]
-
-async function writeKiroSession(options: {
-  manifest?: Record<string, unknown>
-  messageLines?: Record<string, unknown>[] | null
-}): Promise<{ file: FileWithMtime }> {
-  const root = await mkdtemp(join(tmpdir(), 'orca-kiro-vault-'))
-  tempDirs.push(root)
-  const sessionDir = join(root, '5fab923ac92fb45c', SESSION_ID)
-  await mkdir(sessionDir, { recursive: true })
-  const manifestPath = join(sessionDir, 'session.json')
-  await writeFile(manifestPath, JSON.stringify(options.manifest ?? MANIFEST))
-  const lines = options.messageLines === undefined ? MESSAGE_LINES : options.messageLines
-  if (lines) {
-    await writeFile(
-      join(sessionDir, 'messages.jsonl'),
-      `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`
-    )
-  }
-  const mtimeMs = Date.parse('2026-10-02T16:04:35.400Z')
-  return { file: { path: manifestPath, mtimeMs, modifiedAt: new Date(mtimeMs).toISOString() } }
-}
-
-describe('parseKiroSessionFile', () => {
-  it('returns null for a malformed session.json', async () => {
-    const { file } = await writeKiroSession({})
-    await writeFile(file.path, '{not-json')
-
-    await expect(parseKiroSessionFile(file, 'darwin')).resolves.toBeNull()
+describe('Kiro session parser', () => {
+  it('matches only <uuid>.json metadata files', () => {
+    expect(isKiroSessionMetadataPath(`/x/${SESSION_ID}.json`)).toBe(true)
+    expect(isKiroSessionMetadataPath(`/x/${SESSION_ID}.jsonl`)).toBe(false)
+    expect(isKiroSessionMetadataPath(`/x/${SESSION_ID}.lock`)).toBe(false)
+    expect(isKiroSessionMetadataPath('/x/agent_config.json')).toBe(false)
   })
 
-  it('parses the manifest and the user/assistant turns of the transcript', async () => {
-    const { file } = await writeKiroSession({})
-    const session = await parseKiroSessionFile(file, 'darwin')
-
-    expect(session?.agent).toBe('kiro')
-    expect(session?.sessionId).toBe(SESSION_ID)
-    expect(session?.title).toBe('Execute PowerShell Sleep Command')
-    expect(session?.cwd).toBe('/private/tmp/kiro-test-proj')
-    expect(session?.model).toBe('claude-opus-5.5')
-    // Reasoning and Summary entries are not replies the user saw.
-    expect(session?.messageCount).toBe(2)
-    expect(session?.previewMessages).toEqual([
-      {
-        role: 'user',
-        text: 'Run the shell command: echo dev-ok',
-        timestamp: '2026-10-02T16:04:12.300Z'
-      },
-      { role: 'assistant', text: 'done', timestamp: '2026-10-02T16:04:30.000Z' }
+  it('reads title, cwd, model and turns from metadata plus transcript', async () => {
+    const path = await writeSession(metadata(), `${prompt}\n${reply}\n`)
+    const session = await parseKiroSessionFile(fileAt(path), 'linux')
+    expect(session).toMatchObject({
+      agent: 'kiro',
+      sessionId: SESSION_ID,
+      title: 'Fix the login bug',
+      cwd: '/tmp/kiro',
+      model: 'claude-opus-5',
+      messageCount: 2
+    })
+    expect(session?.previewMessages.map((message) => message.text)).toEqual([
+      'Fix the login bug',
+      'Fixed it.'
     ])
-    expect(session?.createdAt).toBe('2026-10-02T16:04:12.112Z')
   })
 
-  it('builds a workspace-scoped resume command through the chat subcommand', async () => {
-    const { file } = await writeKiroSession({})
-    const session = await parseKiroSessionFile(file, 'darwin')
-
-    expect(session?.resumeCommand).toBe(
-      `cd '/private/tmp/kiro-test-proj' && kiro-cli chat --tui --resume-id '${SESSION_ID}'`
-    )
+  it('keeps a complete final record that lacks a trailing newline', async () => {
+    const path = await writeSession(metadata(), `${prompt}\n${reply}`)
+    expect((await parseKiroSessionFile(fileAt(path), 'linux'))?.messageCount).toBe(2)
   })
 
-  it('surfaces an unreadable manifest instead of answering "no session"', async () => {
-    const { file } = await writeKiroSession({})
-    await rm(file.path)
-    await mkdir(file.path)
-
-    await expect(parseKiroSessionFile(file, 'darwin')).rejects.toThrow()
-  })
-
-  it('surfaces an unreadable transcript instead of listing a partial session', async () => {
-    const { file } = await writeKiroSession({ messageLines: null })
-    await mkdir(join(dirname(file.path), 'messages.jsonl'))
-
-    await expect(parseKiroSessionFile(file, 'darwin')).rejects.toThrow()
-  })
-
-  it('still lists a session that has no transcript yet', async () => {
-    const { file } = await writeKiroSession({ messageLines: null })
-    const session = await parseKiroSessionFile(file, 'darwin')
-
-    expect(session?.title).toBe('Execute PowerShell Sleep Command')
+  it('lists a session whose transcript has not been written yet', async () => {
+    const path = await writeSession(metadata())
+    const session = await parseKiroSessionFile(fileAt(path), 'linux')
     expect(session?.messageCount).toBe(0)
+    expect(session?.title).toBe('Fix the login bug')
   })
 
-  it('falls back to the first prompt when the manifest has no title', async () => {
-    const { file } = await writeKiroSession({ manifest: { ...MANIFEST, title: '' } })
-    const session = await parseKiroSessionFile(file, 'darwin')
-
-    expect(session?.title).toBe('Run the shell command: echo dev-ok')
+  it('omits a subagent child session from the top-level list', async () => {
+    const path = await writeSession(
+      metadata({ parent_session_id: '1c6f2d3b-4e5a-4b6c-9d7e-8f9a0b1c2d3e' }),
+      `${prompt}\n`
+    )
+    expect(await parseKiroSessionFile(fileAt(path), 'linux')).toBeNull()
   })
-})
 
-describe('isKiroSessionManifestPath', () => {
-  it('matches only session.json inside a sess_ directory', () => {
-    expect(isKiroSessionManifestPath(join('h', SESSION_ID, 'session.json'))).toBe(true)
-    expect(isKiroSessionManifestPath(join('h', SESSION_ID, 'messages.jsonl'))).toBe(false)
-    expect(isKiroSessionManifestPath(join('cli', '00a05f6b.json'))).toBe(false)
+  it('resumes by the validated file name, not a mismatched metadata session_id', async () => {
+    const path = await writeSession(metadata({ session_id: "x' && rm -rf ~" }))
+    const session = await parseKiroSessionFile(fileAt(path), 'linux')
+    expect(session?.sessionId).toBe(SESSION_ID)
+    expect(session?.resumeCommand).toContain(`--resume-id '${SESSION_ID}'`)
+  })
+
+  it('parses streamed remote lines the same way', async () => {
+    const session = await parseKiroSessionContent(
+      fileAt(`/home/u/.kiro/sessions/cli/${SESSION_ID}.json`),
+      metadata(),
+      [prompt, reply],
+      'linux'
+    )
+    expect(session?.messageCount).toBe(2)
+    expect(session?.resumeCommand).toBe(
+      `cd '/tmp/kiro' && kiro-cli chat --tui --resume-id '${SESSION_ID}'`
+    )
   })
 })

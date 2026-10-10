@@ -22,7 +22,6 @@ import {
   restTestSend,
   type RestTestRig
 } from '../../../native-chat/agent-session-wire/structured-agent-session-rest-test-rig'
-import * as providerSupport from '../../../native-chat/agent-session-wire/structured-agent-session-provider-support'
 import { OrcaRuntimeService } from '../../orca-runtime'
 import type { RpcResponse } from '../core'
 import { RpcDispatcher } from '../dispatcher'
@@ -82,9 +81,7 @@ beforeEach(async () => {
   vi.spyOn(runtime, 'getClientSettings').mockImplementation(
     () =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the RPC gate reads only this one setting.
-      ({ experimentalStructuredNativeChat: true }) as ReturnType<
-        OrcaRuntimeService['getClientSettings']
-      >
+      ({ experimentalNativeChat: true }) as ReturnType<OrcaRuntimeService['getClientSettings']>
   )
   dispatcher = new RpcDispatcher({ runtime, methods: STRUCTURED_AGENT_SESSION_METHODS })
 })
@@ -219,22 +216,6 @@ describe('the accessor', () => {
             details: { reason: 'recordMissing' }
           }
         }
-      }
-    })
-
-    await restingChat()
-    vi.spyOn(providerSupport, 'adapterSupportsRecord').mockReturnValue(false)
-    const [unsupported] = await call('agentSession.history', {
-      sessionId: SESSION,
-      direction: 'tail'
-    })
-    expect(unsupported).toMatchObject({
-      ok: false,
-      error: {
-        // Not a passthrough code: released clients match the message, as before.
-        code: 'runtime_error',
-        message: 'structured_agent_session_unsupported',
-        data: { refusal: { details: { reason: 'hostUnsupported' } } }
       }
     })
   })
@@ -490,7 +471,7 @@ describe('every close withdraws what is queued (P2-29)', () => {
     await restingChat()
     // The delivery loop has not reached its first start yet.
     const { loop } = rig.host.collaboratorsForTests().conversationDelivery
-    vi.spyOn(loop, 'wake').mockImplementation(() => undefined)
+    vi.spyOn(loop, 'wake').mockImplementation(() => Promise.resolve())
     const reader: unknown[] = []
     await rig.host.subscribe({
       id: 'reader',

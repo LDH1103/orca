@@ -5,11 +5,11 @@
 // shared host code read a definition through it and never branch on the agent's name.
 
 import type { AgentSessionCapabilities } from '../../../shared/agent-session-capabilities'
+import type { AgentSessionStoredAgent } from '../../../shared/agent-session-stored-agent'
 import type { AgentSessionModelOption } from '../../../shared/agent-session-wire'
 
-export type StructuredAgentDefinition = {
-  /** The Orca agent whose sessions this definition describes. */
-  agent: string
+/** `agent` names the Orca agent whose sessions this describes; the storage fields bound its records. */
+export type StructuredAgentDefinition = AgentSessionStoredAgent & {
   capabilities: AgentSessionCapabilities
   /** How a session's options read and change while no child runs. */
   restingOptions: {
@@ -20,4 +20,9 @@ export type StructuredAgentDefinition = {
     /** An unpicked effort reads as the model's default effort, as a running child reports it. */
     effortDefaultsToModel: boolean
   }
+}
+
+/** An agent whose account is one config directory, as Claude's and Codex's are. */
+export type DirectoryAccountAgentDefinition = StructuredAgentDefinition & {
+  accountHomeVariable: string
 }

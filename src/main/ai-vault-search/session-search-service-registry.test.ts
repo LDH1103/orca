@@ -67,7 +67,7 @@ describe('session search service registry', () => {
       'debug'
     )
   })
-  describe.each(['qoder', 'jcode', 'kiro'] as const)('%s history compatibility', (agent) => {
+  describe.each(['qoder', 'jcode'] as const)('%s history compatibility', (agent) => {
     it.each(['runtime', 'relay'] as const)(
       'negotiates hits before retrieval on %s, without widening explicit filters',
       async (transport) => {

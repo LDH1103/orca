@@ -57,10 +57,10 @@ function isolatedScanRoots(root: string) {
     droidProjectsDir: join(root, 'droid-projects'),
     kimiSessionsDir: join(root, 'kimi-sessions'),
     museSessionsDir: join(root, 'muse-sessions'),
-    kiroSessionsDir: join(root, 'kiro-sessions'),
     zcodeDbPath: join(root, 'zcode-db.sqlite'),
     ompSessionsDir: join(root, 'omp-sessions'),
     jcodeSessionsDir: join(root, 'jcode-sessions'),
+    kiroSessionsDir: join(root, 'kiro-sessions'),
     primeAgentSessionsDir: join(root, 'prime-agent-sessions')
   }
 }

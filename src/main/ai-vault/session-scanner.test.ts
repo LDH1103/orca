@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AI_VAULT_AGENTS } from '../../shared/ai-vault-types'
 import { scanAiVaultSessions } from './session-scanner'
 import { isolatedScanRoots, jsonLines } from './session-scanner-test-fixtures'
+import { KIRO_FIXTURE_SESSION_ID } from './session-scanner-kiro-fixtures'
 import { writeEveryAgentVault } from './session-scanner-every-agent-fixture'
 
 // Why: the SQLite worker bundle does not exist in the test runtime; route the
@@ -464,7 +465,7 @@ describe('scanAiVaultSessions', () => {
       "cd '/tmp/jcode' && jcode --resume 'session_jcode-session'"
     )
     expect(commandByAgent.get('kiro')).toBe(
-      "cd '/tmp/kiro' && kiro-cli chat --tui --resume-id 'sess_kiro-session'"
+      `cd '/tmp/kiro' && kiro-cli chat --tui --resume-id '${KIRO_FIXTURE_SESSION_ID}'`
     )
 
     const ompSession = result.sessions.find((session) => session.agent === 'omp')

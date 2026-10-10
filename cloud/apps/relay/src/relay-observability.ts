@@ -63,6 +63,10 @@ export type AssignmentUnavailableCause =
   | 'relay_connection_headroom_exhausted'
   | 'relay_home_cell_unavailable'
   | 'relay_assignment_row_busy'
+  // Step 5: a starting director's map, a never-seen host with the database down, or intake.
+  | 'reserve-map-incomplete'
+  | 'reserve-database'
+  | 'reserve-paced'
 
 // Row-lock waiters seen in one pg_stat_activity sample, by who waits, on which
 // table, behind whom. Roles come from each pool's application_name.
@@ -165,6 +169,7 @@ type RelayMetricDeltas = {
   controlRenewalFlushRowsMax: number
   controlActivityRecoveries: number
   controlActivityRecoveryFailures: number
+  hostHellosShed: number
 }
 
 // A host chooses how often it answers a ping, so the process-wide window is a
@@ -221,7 +226,8 @@ const emptyDeltas = (): RelayMetricDeltas => ({
   controlRenewalFlushLatenciesMs: [],
   controlRenewalFlushRowsMax: 0,
   controlActivityRecoveries: 0,
-  controlActivityRecoveryFailures: 0
+  controlActivityRecoveryFailures: 0,
+  hostHellosShed: 0
 })
 
 function ascending(values: number[]): number[] {
@@ -287,6 +293,10 @@ export class RelayObservability implements RelayRuntimeObserver {
 
   recordReconnect(): void {
     this.deltas.reconnects++
+  }
+
+  recordHostHelloShed(): void {
+    this.deltas.hostHellosShed++
   }
 
   recordAssignmentAdmission(outcome: AssignmentAdmissionOutcome): void {
@@ -571,6 +581,7 @@ export class RelayObservability implements RelayRuntimeObserver {
         deltas.controlRenewalsByOutcome.control_activity_not_found ?? 0,
       controlActivityRecoveriesDelta: deltas.controlActivityRecoveries,
       controlActivityRecoveryFailuresDelta: deltas.controlActivityRecoveryFailures,
+      hostHellosShedDelta: deltas.hostHellosShed,
       // Meaning changed when renewals began batching: for a batched row this is
       // the flush's duration, not that row's own statement latency. The
       // per-flush fields below are the ones to read for statement cost.
