@@ -230,6 +230,8 @@ export function extractAgentProviderSession(
     }
     // Why: DSH's hook bridge always sends an empty `transcript_path` (its persistence seam
     // exposes no artifact path), so the session id alone carries the resume target.
+    // Why: Kiro's hooks send no transcript path; the id alone feeds `--resume-id`.
+    case 'kiro':
     case 'dsh': {
       const id = readSessionId(payload, ['session_id'])
       return id ? { key: 'session_id', id } : null
@@ -279,11 +281,6 @@ export function extractAgentProviderSession(
       const id = readSessionId(payload, ['conversation_id'])
       return id ? { key: 'conversation_id', id } : null
     }
-    // Why: Kiro's hook `session_id` (`sess_<uuid>`) is the id `--resume-id` takes.
-    case 'kiro': {
-      const id = readSessionId(payload, ['session_id'])
-      return id ? { key: 'session_id', id } : null
-    }
     case 'amp':
     case 'command-code':
     case 'hermes':
@@ -292,4 +289,4 @@ export function extractAgentProviderSession(
 }
 
 // Re-exported so the 18 existing call sites keep one import path.
-export { getAgentResumeArgv } from './agent-resume-argv'
+export { getAgentForkArgv, getAgentResumeArgv } from './agent-resume-argv'

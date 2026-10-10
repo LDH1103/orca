@@ -15,6 +15,7 @@ import type {
   RuntimeMobileSessionTerminalClientTab
 } from './runtime-mobile-session-tab-contracts'
 import type { CliStatusCaller } from './orchestration-caller-status'
+import type { RuntimeHostDescriptor } from './runtime-host-descriptor'
 
 export type * from './runtime-mobile-session-tab-contracts'
 
@@ -79,7 +80,8 @@ export type RuntimeStatus = {
   worktreeCreateIdempotency?: {
     dedupeTtlMs: number
   }
-  /** True only when this Windows host can prove process creation times for PID ownership. */
+  /** True only when this Windows host can read process creation times. TEMPORARY: read only by
+   *  older clients, which keep re-probing WSL until it is true; remove after their window. */
   windowsProcessStartTimeAvailable?: boolean
   /**
    * Optional for mixed-version peers. Absence means the host predates structured
@@ -92,6 +94,8 @@ export type RuntimeStatus = {
   hostPlatform?: NodeJS.Platform
   /** Optional display name reported by the answering runtime. */
   machineName?: string
+  /** Absent from older hosts and from hosts whose profile could not persist an installation id. */
+  hostDescriptor?: RuntimeHostDescriptor
   terminalWindowsShell?: string | null
   deviceScope?: DeviceScope
   floatingWorkspaceEnabled?: boolean

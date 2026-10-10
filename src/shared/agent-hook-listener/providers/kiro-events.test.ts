@@ -2,85 +2,71 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createHookListenerState, type HookListenerState } from '../listener-state'
 import { normalizeAndAccept } from '../../agent-hook-listener-test-harness'
 
-const SESSION_ID = 'sess_966a9c85-10a0-4a38-8fd0-91dbeffb032b'
+// Payload shapes copied from a live kiro-cli 2.28 TUI run with hooks on a custom agent.
+const base = { cwd: '/tmp/ws', session_id: 'f6fe70d7-a1b2-4c3d-9e8f-001122334455' }
 
-/**
- * Shapes captured from kiro-cli 2.27.0 (`chat --tui --v3`) running a standalone
- * `~/.kiro/hooks/*.json` file: Claude-style `hook_event_name`, `session_id`, `cwd`, plus
- * `prompt` on UserPromptSubmit and `tool_name`/`tool_input`/`tool_response` on tool events.
- */
-function kiroEvent(
-  hookEventName: string,
-  extra: Record<string, unknown> = {}
-): Record<string, unknown> {
-  return {
-    session_id: SESSION_ID,
-    hook_event_name: hookEventName,
-    cwd: 'C:\\Users\\dev\\project',
-    ...extra
-  }
+function event(name: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { ...base, hook_event_name: name, ...extra }
 }
 
-let state: HookListenerState
-beforeEach(() => {
-  state = createHookListenerState()
-})
+describe('normalizeKiroEvent', () => {
+  let state: HookListenerState
 
-describe('Kiro hook events', () => {
-  it('drops SessionStart, which Kiro fires lazily right before the first prompt', () => {
-    expect(normalizeAndAccept(state, 'kiro', kiroEvent('SessionStart'))).toBeNull()
+  beforeEach(() => {
+    state = createHookListenerState()
   })
 
-  it('reports working from UserPromptSubmit and carries the prompt', () => {
-    const event = normalizeAndAccept(
+  it('lands an idle row when the agent spawns', () => {
+    const spawned = normalizeAndAccept(state, 'kiro', event('agentSpawn'))
+    expect(spawned?.payload.state).toBe('done')
+    expect(spawned?.payload.agentType).toBe('kiro')
+  })
+
+  it('reports a prompt as working and stop as done with the final reply', () => {
+    const submitted = normalizeAndAccept(
       state,
       'kiro',
-      kiroEvent('UserPromptSubmit', { prompt: 'Run the shell command: echo probe-ok' })
+      event('userPromptSubmit', { prompt: 'read note.txt' })
     )
-    expect(event?.payload).toMatchObject({
-      state: 'working',
-      agentType: 'kiro',
-      prompt: 'Run the shell command: echo probe-ok'
-    })
-  })
+    expect(submitted?.payload.state).toBe('working')
+    expect(submitted?.payload.prompt).toBe('read note.txt')
 
-  it('reports working for PreToolUse and names the tool', () => {
-    const event = normalizeAndAccept(
+    const stopped = normalizeAndAccept(
       state,
       'kiro',
-      kiroEvent('PreToolUse', {
-        tool_name: 'execute_pwsh',
-        tool_input: { command: 'echo probe-ok' }
+      event('stop', { assistant_response: 'hello' })
+    )
+    expect(stopped?.payload.state).toBe('done')
+    expect(stopped?.payload.prompt).toBe('read note.txt')
+    expect(stopped?.payload.lastAssistantMessage).toBe('hello')
+  })
+
+  it('surfaces the running tool while working', () => {
+    normalizeAndAccept(state, 'kiro', event('userPromptSubmit', { prompt: 'read it' }))
+    const pre = normalizeAndAccept(
+      state,
+      'kiro',
+      event('preToolUse', {
+        tool_name: 'read',
+        tool_input: { operations: [{ mode: 'Line', path: '/tmp/ws/note.txt' }] }
       })
     )
-    expect(event?.payload).toMatchObject({
-      state: 'working',
-      agentType: 'kiro',
-      toolName: 'execute_pwsh'
-    })
-  })
+    expect(pre?.payload.state).toBe('working')
+    expect(pre?.payload.toolName).toBe('read')
 
-  it('stays working after PostToolUse with a string tool_response', () => {
-    const event = normalizeAndAccept(
+    const post = normalizeAndAccept(
       state,
       'kiro',
-      kiroEvent('PostToolUse', {
-        tool_name: 'execute_pwsh',
-        tool_input: { command: 'echo probe-ok' },
-        tool_response: 'probe-ok'
+      event('postToolUse', {
+        tool_name: 'read',
+        tool_input: { operations: [{ mode: 'Line', path: '/tmp/ws/note.txt' }] },
+        tool_response: { items: [{ Text: 'hello' }] }
       })
     )
-    expect(event?.payload).toMatchObject({ state: 'working', agentType: 'kiro' })
+    expect(post?.payload.state).toBe('working')
   })
 
-  it('reports done on Stop and on SessionEnd', () => {
-    for (const eventName of ['Stop', 'SessionEnd']) {
-      const event = normalizeAndAccept(state, 'kiro', kiroEvent(eventName))
-      expect(event?.payload).toMatchObject({ state: 'done', agentType: 'kiro' })
-    }
-  })
-
-  it('ignores lifecycle events it does not model', () => {
-    expect(normalizeAndAccept(state, 'kiro', kiroEvent('SomethingElse'))).toBeNull()
+  it('ignores event names Kiro does not document', () => {
+    expect(normalizeAndAccept(state, 'kiro', event('Stop'))).toBeNull()
   })
 })

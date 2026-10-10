@@ -8,7 +8,6 @@ import {
   AGENT_SESSION_DSH_RESUME_RUNTIME_CAPABILITY,
   AGENT_SESSION_KIMI_RESUME_RUNTIME_CAPABILITY,
   AGENT_SESSION_CURSOR_RESUME_RUNTIME_CAPABILITY,
-  AGENT_SESSION_KIRO_RESUME_RUNTIME_CAPABILITY,
   AGENT_SESSION_MUSE_RESUME_RUNTIME_CAPABILITY,
   AGENT_SESSION_OPENCODE2_RESUME_RUNTIME_CAPABILITY,
   AGENT_SESSION_OMP_RESUME_PATH_RUNTIME_CAPABILITY,
@@ -35,13 +34,6 @@ describe('agentResumeHostAuthorityCapability', () => {
       AGENT_SESSION_OPENCODE2_RESUME_RUNTIME_CAPABILITY
     )
     expect(RUNTIME_CAPABILITIES).toContain(AGENT_SESSION_OPENCODE2_RESUME_RUNTIME_CAPABILITY)
-  })
-
-  it('gates Kiro resume behind its own advertised capability', () => {
-    expect(agentResumeHostAuthorityCapability('kiro')).toBe(
-      AGENT_SESSION_KIRO_RESUME_RUNTIME_CAPABILITY
-    )
-    expect(RUNTIME_CAPABILITIES).toContain(AGENT_SESSION_KIRO_RESUME_RUNTIME_CAPABILITY)
   })
 
   it('leaves agents shipped with host authority on the generic probe', () => {
@@ -81,7 +73,7 @@ describe('agentResumeHostAuthorityCapability', () => {
       omp: AGENT_SESSION_OMP_RESUME_PATH_RUNTIME_CAPABILITY,
       kimi: AGENT_SESSION_KIMI_RESUME_RUNTIME_CAPABILITY,
       dsh: AGENT_SESSION_DSH_RESUME_RUNTIME_CAPABILITY,
-      kiro: AGENT_SESSION_KIRO_RESUME_RUNTIME_CAPABILITY
+      kiro: 'agent-session.kiro-resume.v1'
     })
   })
 })
