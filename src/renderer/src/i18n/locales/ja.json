@@ -20086,6 +20086,23 @@
       "cancel": "キャンセル",
       "noTransition": "{{key}} では {{column}} へのステータス変更を利用できません。",
       "queryTooLong": "Jira クエリが長すぎます。クエリを短くするか、フィルターをクリアしてください。"
+    },
+    "editFields": {
+      "none": "なし",
+      "searchOptions": "オプションを検索...",
+      "noOptions": "検索に一致するオプションはありません。",
+      "editDescription": "説明を編集",
+      "editInJira": "Jira で編集",
+      "descriptionLossy": "この説明には、画像やメンションなど Orca がまだ書き戻せない内容が含まれています。",
+      "descriptionLabel": "説明",
+      "cancel": "キャンセル",
+      "saveDescription": "保存",
+      "required": "{{field}} は必須です。",
+      "invalid": "{{field}} に有効な値を入力してください。",
+      "save": "{{field}} を保存",
+      "commaSeparated": "カンマ区切りの値",
+      "title": "フィールド",
+      "retry": "再試行"
     }
   },
   "updates": {

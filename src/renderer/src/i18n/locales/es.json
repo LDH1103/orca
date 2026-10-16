@@ -20113,6 +20113,23 @@
       "cancel": "Cancelar",
       "noTransition": "No hay ningún cambio de estado a {{column}} disponible para {{key}}.",
       "queryTooLong": "La consulta de Jira es demasiado larga. Acorta la consulta o borra los filtros."
+    },
+    "editFields": {
+      "none": "Ninguno",
+      "searchOptions": "Buscar opciones...",
+      "noOptions": "Ninguna opción coincide con la búsqueda.",
+      "editDescription": "Editar descripción",
+      "editInJira": "Editar en Jira",
+      "descriptionLossy": "Esta descripción tiene contenido que Orca aún no puede volver a escribir, como imágenes o menciones.",
+      "descriptionLabel": "Descripción",
+      "cancel": "Cancelar",
+      "saveDescription": "Guardar",
+      "required": "{{field}} es obligatorio.",
+      "invalid": "Introduce un valor válido para {{field}}.",
+      "save": "Guardar {{field}}",
+      "commaSeparated": "Valores separados por comas",
+      "title": "Campos",
+      "retry": "Reintentar"
     }
   }
 }

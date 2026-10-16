@@ -20086,6 +20086,23 @@
       "cancel": "取消",
       "noTransition": "{{key}} 没有可转到 {{column}} 的状态更改。",
       "queryTooLong": "Jira 查询过长。请缩短查询或清除筛选条件。"
+    },
+    "editFields": {
+      "none": "无",
+      "searchOptions": "搜索选项...",
+      "noOptions": "没有与搜索匹配的选项。",
+      "editDescription": "编辑描述",
+      "editInJira": "在 Jira 中编辑",
+      "descriptionLossy": "此描述包含 Orca 暂时无法写回的内容，例如图片或提及。",
+      "descriptionLabel": "描述",
+      "cancel": "取消",
+      "saveDescription": "保存",
+      "required": "{{field}} 为必填项。",
+      "invalid": "请为 {{field}} 输入有效值。",
+      "save": "保存 {{field}}",
+      "commaSeparated": "以逗号分隔的值",
+      "title": "字段",
+      "retry": "重试"
     }
   },
   "updates": {

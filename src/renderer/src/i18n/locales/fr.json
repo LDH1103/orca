@@ -20086,6 +20086,23 @@
       "cancel": "Annuler",
       "noTransition": "Aucun changement de statut vers {{column}} n'est disponible pour {{key}}.",
       "queryTooLong": "La requête Jira est trop longue. Raccourcissez la requête ou effacez les filtres."
+    },
+    "editFields": {
+      "none": "Aucun",
+      "searchOptions": "Rechercher des options...",
+      "noOptions": "Aucune option ne correspond à votre recherche.",
+      "editDescription": "Modifier la description",
+      "editInJira": "Modifier dans Jira",
+      "descriptionLossy": "Cette description contient du contenu qu’Orca ne peut pas encore réécrire, comme des images ou des mentions.",
+      "descriptionLabel": "Description",
+      "cancel": "Annuler",
+      "saveDescription": "Enregistrer",
+      "required": "{{field}} est obligatoire.",
+      "invalid": "Saisissez une valeur valide pour {{field}}.",
+      "save": "Enregistrer {{field}}",
+      "commaSeparated": "Valeurs séparées par des virgules",
+      "title": "Champs",
+      "retry": "Réessayer"
     }
   },
   "updates": {
