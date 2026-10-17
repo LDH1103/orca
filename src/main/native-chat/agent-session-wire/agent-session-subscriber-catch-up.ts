@@ -17,6 +17,7 @@ import {
   withPublishedWork,
   withPublishedWorkResult
 } from './agent-session-published-work'
+import type { AgentSessionPublishedWork } from './agent-session-published-work'
 import type { StructuredAgentSessionCurrentWork } from './structured-agent-session-current-work'
 import {
   createAgentSessionCatchUpReader,
@@ -42,7 +43,10 @@ export type SubscriberDeliveryPort = {
   emit: (
     subscriber: Subscriber,
     event: AgentSessionSubscribeEvent,
-    options?: { withholdQueued?: boolean }
+    options?: {
+      withholdQueued?: boolean
+      currentWork?: AgentSessionPublishedWork
+    }
   ) => void
   isActive: (subscriber: Subscriber) => boolean
   activity: (sessionId: string) => AgentSessionTurnActivity | null
@@ -66,9 +70,15 @@ export function deliverToSubscriber(
     ...(publishedActivity !== undefined ? { activity: publishedActivity } : {})
   }
   const work = port.hooks.readCurrentWork?.(subscriber.sessionId, journal)
+  const emit: SubscriberDeliveryPort['emit'] = (target, event, options) =>
+    port.emit(target, event, { ...options, currentWork: work })
+  const delivery = { ...port, emit }
   // Caught up, so there are no rows to read: every publish behind a commit's own delivery.
   if (sameJournalCursor(subscriber.cursor, journal.cursor())) {
-    emitCaughtUp(port, subscriber, emitCheckpoint, shared, { journal, work })
+    emitCaughtUp(delivery, subscriber, emitCheckpoint, shared, {
+      journal,
+      work
+    })
     return
   }
   const reader = subscriberHistoryReader(subscriber)
@@ -85,7 +95,7 @@ export function deliverToSubscriber(
     )
     if (!result.ok) {
       const page = { ...result.page, fence: subscriber.fence }
-      port.emit(subscriber, {
+      emit(subscriber, {
         type: 'reset',
         sessionId: subscriber.sessionId,
         reset: result.reset,
@@ -100,17 +110,19 @@ export function deliverToSubscriber(
     const page = result.page
     const advanced = page.window.nextCursor.sequence > subscriber.cursor.sequence
     if (!advanced) {
-      emitCaughtUp(port, subscriber, emitCheckpoint, shared, { journal, work })
+      emitCaughtUp(delivery, subscriber, emitCheckpoint, shared, {
+        journal,
+        work
+      })
       return
     }
-    // A phone's app ends a stream that outruns its unacked window, so a gap of more than one page
-    // arrives as the newest page instead; older rows load on scroll.
-    if (page.hasNewer && subscriber.boundedFrames) {
+    // Replaying an unbounded gap blocks the host; older rows remain available on scroll.
+    if (page.hasNewer && subscriber.snapshotCatchUp !== false) {
       const tail = withPublishedWork(
         readAgentSessionHydrationPage(journal, subscriber.fence, reader),
         work
       )
-      port.emit(subscriber, {
+      emit(subscriber, {
         type: 'snapshot',
         sessionId: subscriber.sessionId,
         page: tail,
@@ -121,7 +133,7 @@ export function deliverToSubscriber(
       subscriber.cursor = tail.liveCursor ?? tail.window.nextCursor
       return
     }
-    port.emit(
+    emit(
       subscriber,
       {
         type: 'batch',
@@ -161,7 +173,10 @@ function emitCaughtUp(
     hostNow: number
     activity?: AgentSessionTurnActivity | null
   },
-  current: { journal: AgentSessionJournal; work: StructuredAgentSessionCurrentWork | undefined }
+  current: {
+    journal: AgentSessionJournal
+    work: StructuredAgentSessionCurrentWork | undefined
+  }
 ): void {
   const commandsChanged = subscriberCommandsChanged(port.hooks, subscriber)
   const queuedChanged = subscriberQueuedMessagesChanged(port.hooks, subscriber)
@@ -176,14 +191,18 @@ function emitCaughtUp(
     queuedChanged ||
     workChanged
   ) {
-    port.emit(subscriber, {
-      type: 'batch',
-      sessionId: subscriber.sessionId,
-      batch: emptyAgentSessionBatch(subscriber.cursor),
-      fence: subscriber.fence,
-      ...(workChanged ? agentSessionPublishedWorkFields(current.journal, work) : {}),
-      ...shared
-    })
+    port.emit(
+      subscriber,
+      {
+        type: 'batch',
+        sessionId: subscriber.sessionId,
+        batch: emptyAgentSessionBatch(subscriber.cursor),
+        fence: subscriber.fence,
+        ...(workChanged ? agentSessionPublishedWorkFields(current.journal, work) : {}),
+        ...shared
+      },
+      { currentWork: work }
+    )
     if (workChanged) {
       subscriber.workView = work.viewKey()
     }

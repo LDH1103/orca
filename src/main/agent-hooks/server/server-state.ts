@@ -310,6 +310,7 @@ export abstract class AgentHookServerState {
       emitStatusRowMutation?: boolean
       preserveTmuxInnerSubjects?: boolean
       statusUnavailable?: true
+      forgetAgentExit?: true
     }
   ): void
   protected abstract deleteStatusEntry(

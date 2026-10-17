@@ -12,13 +12,16 @@ export const NODE_RUNTIME_INCLUDE = [
   'tests/e2e/helpers/electron-process-shutdown.unit.test.ts',
   'src/main/ai-vault-search/session-search-index-writer.test.ts',
   'src/main/ai-vault/session-scanner-unlimited-dedup.test.ts',
-  // Disk checkpoints require Node's iterable writeFile semantics.
-  'src/main/ai-vault/session-parse-cache-checkpoint.test.ts',
-  'src/main/ai-vault/session-parse-cache-save-lane.test.ts',
+  // The parse cache persists through node:sqlite.
+  'src/main/ai-vault/session-parse-cache-antigravity-upgrade.test.ts',
+  'src/main/ai-vault/session-parse-cache-devin-upgrade.test.ts',
+  'src/main/ai-vault/session-parse-cache-large-scan.test.ts',
   'src/main/ai-vault/session-parse-cache-metadata-checkpoint.test.ts',
+  'src/main/ai-vault/session-parse-cache-persistence.test.ts',
   // Electron main bridges streams with Node's implementation.
   'src/main/host/electron-http-client.test.ts',
   'src/main/daemon/daemon-init-provider-installation.test.ts',
+  'src/main/orcad/orcad-daemon-teardown-linux.test.ts',
   'src/renderer/src/components/terminal-pane/pty-input-write-queue.test.ts',
   'src/renderer/src/lib/react-commit-cascade-observer.test.ts',
   'src/renderer/src/lib/react-commit-cascade-telemetry.test.ts',

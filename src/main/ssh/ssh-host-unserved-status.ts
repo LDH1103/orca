@@ -15,7 +15,8 @@ export function unservedServerStatus(
     ...(decision.terminals !== undefined ? { terminals: decision.terminals } : {}),
     ...(decision.terminalsElsewhere ? { terminalsElsewhere: true } : {}),
     ...(decision.canLeaveBehind ? { canLeaveBehind: true } : {}),
-    ...(decision.held ? { held: true } : {})
+    ...(decision.held ? { held: true } : {}),
+    ...(decision.bridged ? { bridged: true } : {})
   }
 }
 

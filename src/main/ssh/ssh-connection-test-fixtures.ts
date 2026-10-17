@@ -17,10 +17,14 @@ export function createTarget(overrides?: Partial<SshTarget>): SshTarget {
   }
 }
 
-/** Walks an attempt's initial auth ladder against a host that keeps listing `hostMethods`. */
+/**
+ * Walks an attempt's initial auth ladder against a host that keeps listing `hostMethods`, stopping
+ * after `maxAttempts` methods as a host that disconnects at its MaxAuthTries would.
+ */
 export function walkInitialAuthLadder(
   config: unknown,
-  hostMethods: AuthenticationType[]
+  hostMethods: AuthenticationType[],
+  maxAttempts = Number.POSITIVE_INFINITY
 ): string[] {
   const authHandler =
     typeof config === 'object' && config !== null && 'authHandler' in config
@@ -38,7 +42,7 @@ export function walkInitialAuthLadder(
   const walked: (AuthenticationType | AnyAuthMethod)[] = []
   let exhausted = false
   let firstCall = true
-  while (!exhausted) {
+  while (!exhausted && walked.length < maxAttempts) {
     handler(firstCall ? null : hostMethods, false, (attempt) => {
       if (attempt === false) {
         exhausted = true

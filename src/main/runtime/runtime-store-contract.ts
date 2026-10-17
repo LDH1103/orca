@@ -65,6 +65,7 @@ export type RuntimeStore = {
   installOrcadMigrationReceivedBlobs?: Store['installOrcadMigrationReceivedBlobs']
   installPendingOrcadMigrationReceivedBlobs?: Store['installPendingOrcadMigrationReceivedBlobs']
   installDeferredOrcadMigrationShellHistory?: Store['installDeferredOrcadMigrationShellHistory']
+  hasPendingOrcadMigrationShellHistory?: Store['hasPendingOrcadMigrationShellHistory']
   peekOrcadMigrationTerminalRestoreHint?: Store['peekOrcadMigrationTerminalRestoreHint']
   consumeOrcadMigrationTerminalRestoreHint?: Store['consumeOrcadMigrationTerminalRestoreHint']
   persistPtyBinding?: Store['persistPtyBinding']
@@ -113,7 +114,6 @@ export type RuntimeStore = {
     branchPrefixCustom: string
     defaultTuiAgent?: GlobalSettings['defaultTuiAgent']
     newWorkspaceSetupOnly?: GlobalSettings['newWorkspaceSetupOnly']
-    setupScriptLaunchMode?: GlobalSettings['setupScriptLaunchMode']
     disabledTuiAgents?: GlobalSettings['disabledTuiAgents']
     agentCmdOverrides?: GlobalSettings['agentCmdOverrides']
     agentDefaultArgs?: GlobalSettings['agentDefaultArgs']

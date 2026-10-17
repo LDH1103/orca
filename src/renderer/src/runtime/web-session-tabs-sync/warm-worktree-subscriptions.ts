@@ -1,22 +1,24 @@
 import { getWindowParkVisible, subscribeWindowParkVisibility } from '@/lib/window-park-visibility'
+import { TERMINAL_WORKTREE_HOT_RETAIN_LIMIT } from '@/components/terminal-pane/terminal-hidden-view-parking'
 import { lastVerifiedRuntimeStatus } from '../../../../shared/runtime-host-status'
 import { useAppStore } from '../../store'
 import type { AppState } from '../../store/types'
 import { getRuntimeEnvironmentRevision } from '../runtime-environment-revision'
-import type { WindowVisibilitySubscriptionParking } from '../window-visibility-subscription-parking'
 import type {
+  ActiveSessionTabsSubscription,
   ActiveSubscriptionArgs,
   installActiveSessionTabsSubscription
 } from './active-session-subscription'
 
-// Why 3: the selected worktree plus the two it is most often toggled with stay warm.
-export const WARM_WORKTREE_SESSION_SUBSCRIPTION_LIMIT = 3
+// Why: match the worktrees whose terminals stay mounted (the selected one plus the hot-retained
+// hidden set); a smaller pool resubscribed on every switch around a working set that never parks.
+export const WARM_WORKTREE_SESSION_SUBSCRIPTION_LIMIT = 1 + TERMINAL_WORKTREE_HOT_RETAIN_LIMIT
 
 type WarmEntry = {
   environmentId: string
   identity: string
   pairingRevision: number | undefined
-  subscription: WindowVisibilitySubscriptionParking
+  subscription: ActiveSessionTabsSubscription
 }
 
 function streamIdentity(
@@ -127,6 +129,7 @@ export function createWarmWorktreeSessionSubscriptions(
       if (warm) {
         entries.delete(key)
         entries.set(key, warm)
+        warm.subscription.reconsiderSelected()
       } else {
         const subscription = install(args)
         if (!subscription) {

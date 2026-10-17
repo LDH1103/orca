@@ -3,16 +3,24 @@ import {
   getRepoExecutionHostId,
   parseExecutionHostId,
   toSshExecutionHostId,
+  toRuntimeExecutionHostId,
   type ExecutionHostId
 } from '../../../shared/execution-host'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { getRepoIdFromWorktreeId } from '@/store/slices/worktree-helpers'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import {
   findFolderWorkspaceOwner,
+  getExplicitRuntimeEnvironmentIdForFolderWorkspace,
   type FolderWorkspaceRuntimeOwnerState
 } from './folder-workspace-runtime-owner'
-import { findIndexedRepoOwner, findIndexedWorktreeOwner } from './worktree-runtime-owner-index'
-import { getKnownExecutionHostIdForWorktree } from './worktree-runtime-owner'
+import {
+  findIndexedRepoOwner,
+  findIndexedWorktreeOwner,
+  findIndexedProjectGroupOwner,
+  hasIndexedDetectedWorktree
+} from './worktree-runtime-owner-index'
+import { resolveExplicitWorktreeOperationRouteResult } from './worktree-operation-catalog-route'
 import type { WorktreeRuntimeOwnerState } from './worktree-runtime-owner-state'
 
 /**
@@ -79,11 +87,73 @@ export function sleepingRecordNamesAnotherExecutionHost(
 ): boolean {
   return agentResumeOriginNamesAnotherExecutionHost(
     record.connectionId,
-    getKnownExecutionHostIdForWorktree(state, record.worktreeId)
+    currentExecutionHostIdForRecord(record, state)
   )
 }
 
 type SleepingRecordOwnerState = WorktreeRuntimeOwnerState & FolderWorkspaceRuntimeOwnerState
+
+// Current routing selection is identity evidence; a focused runtime is not.
+function currentExecutionHostIdForRecord(
+  record: SleepingAgentSessionRecord,
+  state: SleepingRecordOwnerState
+): ExecutionHostId | null {
+  const worktreeId = record.worktreeId
+  if (worktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
+    return 'local'
+  }
+  const activeHost =
+    state.activeWorktreeId === worktreeId
+      ? parseExecutionHostId(state.activeWorkspaceExecutionHostId)
+      : null
+  if (activeHost) {
+    return activeHost.id
+  }
+  const scope = parseWorkspaceKey(worktreeId)
+  if (scope?.type === 'folder') {
+    const environmentId = getExplicitRuntimeEnvironmentIdForFolderWorkspace(
+      state,
+      scope.folderWorkspaceId
+    )
+    if (environmentId) {
+      return toRuntimeExecutionHostId(environmentId)
+    }
+    const folder = findFolderWorkspaceOwner(state, scope.folderWorkspaceId)
+    if (!folder) {
+      return null
+    }
+    if (
+      !folder.executionHostId &&
+      !folder.connectionId &&
+      state.projectGroups?.some((group) => group.id === folder.projectGroupId) &&
+      !findIndexedProjectGroupOwner(state.projectGroups, folder.projectGroupId)
+    ) {
+      return null
+    }
+    return ownerExecutionHostIdForRecord(record, state) ?? 'local'
+  }
+  const resolution = resolveExplicitWorktreeOperationRouteResult(state, worktreeId)
+  if (resolution.kind === 'resolved') {
+    return (
+      resolution.route.executionHostId ??
+      (resolution.route.runtimeEnvironmentId
+        ? toRuntimeExecutionHostId(resolution.route.runtimeEnvironmentId)
+        : null)
+    )
+  }
+  if (
+    resolution.kind === 'ambiguous' ||
+    hasIndexedDetectedWorktree(state.detectedWorktreesByRepo, worktreeId)
+  ) {
+    return null
+  }
+  const worktree = findIndexedWorktreeOwner(state.worktreesByRepo, worktreeId)
+  const repo = findIndexedRepoOwner(
+    state.repos,
+    worktree?.repoId ?? getRepoIdFromWorktreeId(worktreeId)
+  )
+  return repo ? getRepoExecutionHostId(repo) : null
+}
 
 // Why owner rows only: two records' machines are a property of their own workspaces, never of the
 // focused server, so this reads no routing default and an unknown owner stays unknown.
@@ -95,7 +165,7 @@ function ownerExecutionHostIdForRecord(
   if (workspaceScope?.type === 'folder') {
     const folder = findFolderWorkspaceOwner(state, workspaceScope.folderWorkspaceId)
     const group = folder?.projectGroupId
-      ? state.projectGroups?.find((candidate) => candidate.id === folder.projectGroupId)
+      ? findIndexedProjectGroupOwner(state.projectGroups, folder.projectGroupId)
       : undefined
     const explicit = parseExecutionHostId(folder?.executionHostId ?? group?.executionHostId)?.id
     const connectionId = folder?.connectionId?.trim() || group?.connectionId?.trim()

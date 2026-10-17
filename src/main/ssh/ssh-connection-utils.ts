@@ -183,6 +183,8 @@ export function createSshOperationAbortError(): Error & { name: string } {
 export type BuildConnectConfigOptions = {
   includeAgent?: boolean
   includePrivateKey?: boolean
+  /** No agent and no key: only the host's keyboard-interactive challenge (and a cached password). */
+  keyboardInteractiveOnly?: boolean
 }
 
 // Why: ssh2 tries privateKey before agent, but parses encrypted privateKey
@@ -212,7 +214,7 @@ export function buildConnectConfig(
     tryKeyboard: true
   }
 
-  const shouldIncludeAgent = options.includeAgent ?? true
+  const shouldIncludeAgent = !options.keyboardInteractiveOnly && (options.includeAgent ?? true)
   const agentSocket = shouldIncludeAgent ? resolveAgentSocket(target, resolved) : undefined
   const agent = agentSocket ? resolveAgentConfigValue(agentSocket, target, resolved) : undefined
 
@@ -224,8 +226,9 @@ export function buildConnectConfig(
     config.agentForward = true
   }
 
-  const keys =
-    (options.includePrivateKey ?? !agent)
+  const keys = options.keyboardInteractiveOnly
+    ? []
+    : (options.includePrivateKey ?? !agent)
       ? resolvePrivateKeys(target, resolved)
       : resolveUnencryptedExplicitPrivateKeys(target, resolved)
   let deferralDecision: boolean | undefined
@@ -243,7 +246,7 @@ export function buildConnectConfig(
       // Decided lazily so the deferred files are read only once the agent has failed, as the retry
       // would read them anyway, never on an agent login that needs no file.
       deferKeyboardInteractive:
-        keys.length === 0
+        keys.length === 0 && !options.keyboardInteractiveOnly
           ? () => {
               if (deferralDecision === undefined) {
                 const deferredKeys = resolvePrivateKeys(target, resolved)

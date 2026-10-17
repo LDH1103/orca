@@ -93,7 +93,17 @@ function commandsFor(model: WorkspaceLayoutModel): LayoutCommand[] {
           title: 'Pane'
         })
       }
+      if (first) {
+        commands.push({
+          type: 'movePaneToNewTab',
+          workspace,
+          tabId: tab.id,
+          leafId: first,
+          windowDetach: { ptyId: 'pty-detached', tabId: 'tab-detached' }
+        })
+      }
       if (second) {
+        commands.push({ type: 'movePaneToNewTab', workspace, tabId: tab.id, leafId: second })
         commands.push({ type: 'closePane', workspace, tabId: tab.id, leafId: second })
         commands.push({
           type: 'closePane',

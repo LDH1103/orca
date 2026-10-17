@@ -81,6 +81,7 @@ const promptsState = {
 vi.mock('./use-mobile-session-view-mode', () => ({
   useMobileSessionViewMode: () => ({
     isTabChatView: (tabId: string) => viewMode.isTabChatView(tabId),
+    setTabView: vi.fn(),
     toggleTabChatView: vi.fn()
   })
 }))

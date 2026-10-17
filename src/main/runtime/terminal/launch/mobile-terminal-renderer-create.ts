@@ -1,9 +1,8 @@
 import { applyClaudeTerminalImageViewerEnv } from '../../terminal-image-viewer-env'
 import type { MobileTerminalCommandOptions, MobileTerminalCommand } from './mobile-terminal-startup'
-import type { OwnedMobileTerminalCreateOptions } from './mobile-terminal-owned-create'
 import type { RuntimePtyWorktreeRecord } from '../../runtime-terminal-state-records'
 import type { TerminalWorkspaceLaunchScope } from '../../runtime-legacy-worker-terminal-recovery-types'
-import { OrcaRuntimeWithCreateMobileSessionTerminal } from './mobile-terminal-create'
+import { OrcaRuntimeWithMobileChatForkCreate } from './mobile-terminal-chat-fork-create'
 import type { WorktreeStartupLaunch } from '../../../../shared/worktree/launch-types'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { SleepingAgentLaunchConfig } from '../../../../shared/agent-session-resume'
@@ -18,12 +17,15 @@ import {
 } from '../../orca-runtime-core'
 import { rendererPublicationThrottle } from '../../../window/renderer-publication-throttle'
 import { deterministicAgentSessionUuid } from '../../runtime-agent-launch-resolution'
+import { assertMobileTerminalShellSupported } from './mobile-terminal-shell-refusal'
 
 export type MobileTerminalCreateOptions = {
   terminalImageViewerSupported?: boolean
   afterTabId?: string
+  sourceChatFork?: { sessionId: string }
   targetGroupId?: string
   command?: string
+  shellOverride?: string
   cwd?: string
   env?: Record<string, string>
   envToDelete?: string[]
@@ -40,22 +42,12 @@ export type MobileTerminalCreateOptions = {
   signal?: AbortSignal
 }
 
-export abstract class OrcaRuntimeWithRunCreateMobileSessionTerminal extends OrcaRuntimeWithCreateMobileSessionTerminal {
-  protected abstract captureReadyGraphEpoch(): number
+export abstract class OrcaRuntimeWithRunCreateMobileSessionTerminal extends OrcaRuntimeWithMobileChatForkCreate {
 
   protected abstract resolveMobileSessionTerminalCommand(
     workspace: TerminalWorkspaceLaunchScope,
     opts: MobileTerminalCommandOptions
   ): Promise<MobileTerminalCommand>
-
-  protected abstract assertStableReadyGraph(expectedGraphEpoch: number): void
-
-  protected abstract createRuntimeOwnedMobileSessionTerminal(
-    worktreeId: string,
-    activate: boolean,
-    afterTabId?: string,
-    opts?: OwnedMobileTerminalCreateOptions
-  ): Promise<RuntimeMobileSessionCreateTerminalResult>
 
   protected abstract ensurePtyBackedMobileSurfaceForRendererTab(
     worktreeId: string,
@@ -99,6 +91,7 @@ export abstract class OrcaRuntimeWithRunCreateMobileSessionTerminal extends Orca
     const workspace = await this.resolveTerminalWorkspaceLaunchScope(worktreeSelector)
     const worktreeId = workspace.id
     const cwd = this.resolveWorkspaceTerminalStartupCwd(workspace, opts.cwd)
+    assertMobileTerminalShellSupported(this.store, workspace, opts.shellOverride, cwd)
     this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId)
     // Older mobile clients append their optimistic tab, so make the host append too until the
     // client advertises the grouped placement contract.
@@ -107,6 +100,11 @@ export abstract class OrcaRuntimeWithRunCreateMobileSessionTerminal extends Orca
       opts.clientNavigationId && opts.supportsSplitGroupPlacement === false
         ? undefined
         : requestedAfterTabId
+    if (opts.sourceChatFork) {
+      return this.createMobileChatForkTerminal({
+        workspace, worktreeId, opts, afterTabId, graphEpoch
+      })
+    }
     let afterDesktopTabId: string | undefined
     if (requestedAfterTabId) {
       const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
@@ -157,6 +155,7 @@ export abstract class OrcaRuntimeWithRunCreateMobileSessionTerminal extends Orca
         afterTabId,
         {
           command: startupCommand.command,
+          ...(opts.shellOverride ? { shellOverride: opts.shellOverride } : {}),
           cwd,
           env: startupCommand.env,
           envToDelete: startupCommand.envToDelete,
@@ -217,6 +216,7 @@ export abstract class OrcaRuntimeWithRunCreateMobileSessionTerminal extends Orca
           afterTabId: afterDesktopTabId,
           targetGroupId: opts.targetGroupId,
           command: startupCommand.command,
+          ...(opts.shellOverride ? { shellOverride: opts.shellOverride } : {}),
           cwd,
           ...(startupCommand.env ? { env: startupCommand.env } : {}),
           ...(startupCommand.envToDelete ? { envToDelete: startupCommand.envToDelete } : {}),
@@ -283,6 +283,7 @@ export abstract class OrcaRuntimeWithRunCreateMobileSessionTerminal extends Orca
           afterTabId,
           {
             command: startupCommand.command,
+            ...(opts.shellOverride ? { shellOverride: opts.shellOverride } : {}),
             cwd,
             env: startupCommand.env,
             envToDelete: startupCommand.envToDelete,

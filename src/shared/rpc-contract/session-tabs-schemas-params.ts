@@ -6,6 +6,7 @@ import { sleepingAgentLaunchConfigSchema } from '../workspace-session-sleeping-a
 import type { TuiAgent } from '../tui-agent'
 import { isTuiAgent } from '../tui-agent-config'
 import { LEGACY_MAX_QUICK_COMMAND_AGENT_PROMPT_LENGTH } from '../terminal-quick-command-prompt-limit'
+import { WindowsShellOverrideParam } from './terminal-unary-params'
 
 export const WorktreeTabSelector = z.object({
   worktree: z
@@ -140,9 +141,12 @@ export const SetTabProps = WorktreeTabSelector.extend({
 })
 
 export const CreateTerminalTab = WorktreeTabSelector.extend({
+  sourceChatFork: z.object({ sessionId: z.string().min(1) }).strict().optional(),
   afterTabId: z.string().optional(),
   targetGroupId: z.string().optional(),
   command: z.string().optional(),
+  // Why: the shell the terminal IS; a shell sent as `command` runs nested in the host default.
+  shell: WindowsShellOverrideParam.optional(),
   cwd: z.string().min(1).optional(),
   env: z.record(z.string(), z.string()).optional(),
   envToDelete: z.array(z.string().min(1).max(256)).max(32).optional(),
@@ -177,6 +181,19 @@ export const CreateTerminalTab = WorktreeTabSelector.extend({
   // returns the in-flight operation instead of spawning a duplicate terminal.
   clientMutationId: z.string().min(1).max(128).optional()
 }).superRefine((value, context) => {
+  if (value.sourceChatFork) {
+    if (!value.clientMutationId) {
+      context.addIssue({ code: 'custom', path: ['clientMutationId'], message: 'A fork needs a mutation id' })
+    }
+    for (const field of [
+      'command', 'shell', 'agent', 'agentPrompt', 'env', 'envToDelete', 'cwd', 'launchConfig',
+      'launchToken', 'launchAgent', 'startupCommandDelivery', 'viewMode'
+    ] as const) {
+      if (value[field] !== undefined) {
+        context.addIssue({ code: 'custom', path: [field], message: 'A fork uses host launch settings' })
+      }
+    }
+  }
   if (value.agentPrompt !== undefined && value.agent === undefined) {
     context.addIssue({
       code: 'custom',
@@ -189,6 +206,14 @@ export const CreateTerminalTab = WorktreeTabSelector.extend({
       code: 'custom',
       path: ['agentPrompt'],
       message: 'Agent prompt cannot be combined with a startup command'
+    })
+  }
+  // Why: agent launches plan their own shell, which would silently replace the pick.
+  if (value.shell !== undefined && (value.agent || value.launchAgent || value.launchConfig)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['shell'],
+      message: 'A shell pick cannot be combined with an agent launch'
     })
   }
 })

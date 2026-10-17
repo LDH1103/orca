@@ -1,8 +1,17 @@
 /** orcad's key record on disk: naming, reading, and exclusive first publication. */
 import { createHash, randomBytes } from 'node:crypto'
-import { linkSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
+import {
+  linkSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import {
   bestEffortFsyncDirectorySync,
@@ -12,9 +21,16 @@ import {
 import { restrictWindowsFile } from '../../shared/secure-path-windows-acl'
 import { ORCAD_MASTER_KEY_BYTES } from './orcad-secret-sealing'
 
+// `os-keyring`: written only by older builds; read to migrate it (see orcad-legacy-keyring-key.ts).
 export type StoredKeyState =
   | { version: 1; backend: 'os-keyring'; account: string; check: string }
-  | { version: 1; backend: 'host-file'; key: string; hostBound: boolean; check: string }
+  | {
+      version: 1
+      backend: 'host-file'
+      key: string
+      hostBound: boolean
+      check: string
+    }
 
 export type RecordRead =
   | { kind: 'absent' }
@@ -36,7 +52,12 @@ export function parseStoredState(raw: string): StoredKeyState | null {
     return null
   }
   if (record.backend === 'os-keyring' && typeof record.account === 'string') {
-    return { version: 1, backend: 'os-keyring', account: record.account, check: record.check }
+    return {
+      version: 1,
+      backend: 'os-keyring',
+      account: record.account,
+      check: record.check
+    }
   }
   if (
     record.backend === 'host-file' &&
@@ -75,19 +96,12 @@ export function orcadSecretStateFileName(machineId: string | null): string {
   return `orcad-secret-store-${machineTag(machineId)}.json`
 }
 
-export function keyringAccount(keyDir: string, machineId: string | null): string {
-  const digest = createHash('sha256')
-    .update(`${resolve(keyDir)}\0${machineTag(machineId)}`)
-    .digest('hex')
-  return `home-${digest.slice(0, 16)}`
-}
-
 function isInside(root: string, path: string): boolean {
   const fromRoot = relative(root, path)
   return !fromRoot.startsWith('..') && !isAbsolute(fromRoot)
 }
 
-/** A throwaway key directory (tests, smoke runs) must not leave an item in the user's keyring. */
+/** A throwaway key directory (tests, smoke runs) must not take over the user's real credential home. */
 export function isTemporaryKeyDir(keyDir: string): boolean {
   const roots = [tmpdir(), '/tmp', '/var/tmp'].flatMap((root) => {
     try {
@@ -118,13 +132,19 @@ export function readStoredRecord(statePath: string): RecordRead {
     if (errorCode(error) === 'ENOENT') {
       return { kind: 'absent' }
     }
-    return { kind: 'unreadable', reason: `its key record could not be read (${String(error)})` }
+    return {
+      kind: 'unreadable',
+      reason: `its key record could not be read (${String(error)})`
+    }
   }
   const stored = parseStoredState(raw)
   // Why not regenerate: the record may hold the only copy of the key.
   return stored
     ? { kind: 'record', stored }
-    : { kind: 'unreadable', reason: `its key record ${statePath} is not valid` }
+    : {
+        kind: 'unreadable',
+        reason: `its key record ${statePath} is not valid`
+      }
 }
 
 /** Creates the record only if none exists, already restricted; otherwise says why not. */
@@ -152,13 +172,76 @@ export function publishRecordExclusively(path: string, record: StoredKeyState): 
   }
 }
 
-export function withdrawRecord(path: string, check: string): void {
+/** Replaces the record only while it is still `expected`; otherwise says why not. */
+export function replaceRecord(
+  path: string,
+  record: StoredKeyState,
+  expected: StoredKeyState
+): string {
+  const staging = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.staging`
   try {
-    if (parseStoredState(readFileSync(path, 'utf8'))?.check === check) {
-      rmSync(path, { force: true })
+    if (!writeSecureFile(staging, JSON.stringify(record), { durable: true })) {
+      return `its key record ${path} could not be restricted to this user`
     }
+    const current = readStoredRecord(path)
+    if (
+      current.kind !== 'record' ||
+      current.stored.backend !== expected.backend ||
+      current.stored.check !== expected.check
+    ) {
+      return 'changed'
+    }
+    renameSync(staging, path)
+    bestEffortFsyncDirectorySync(dirname(path))
+    return 'replaced'
+  } catch (error) {
+    return `its key record ${path} could not be written (${error instanceof Error ? error.message : String(error)})`
+  } finally {
+    rmSync(staging, { force: true })
+  }
+}
+
+function isLiveProcess(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM: alive, owned by someone else.
+    return errorCode(error) === 'EPERM'
+  }
+}
+
+/**
+ * Removes staging files a crashed write of this record left beside it; they can hold a master key.
+ * Why only this record's: on a shared (NFS) home another machine's writer PID means nothing here.
+ * Only this user's regular files, whose local writer is gone.
+ */
+export function sweepStaleRecordStaging(statePath: string): void {
+  const dir = dirname(statePath)
+  const prefix = `${basename(statePath)}.`
+  let names: string[]
+  try {
+    names = readdirSync(dir)
   } catch {
-    // Left in place, the next start reports the missing keyring item instead of losing data.
+    return
+  }
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null
+  for (const name of names) {
+    const pid = name.startsWith(prefix)
+      ? /^(\d+)\.[0-9a-f]{8}\.staging$/.exec(name.slice(prefix.length))?.[1]
+      : undefined
+    if (!pid || Number(pid) === process.pid || isLiveProcess(Number(pid))) {
+      continue
+    }
+    const path = join(dir, name)
+    try {
+      const stat = lstatSync(path)
+      if (stat.isFile() && (uid === null || stat.uid === uid)) {
+        rmSync(path, { force: true })
+      }
+    } catch {
+      // Gone already, or not ours to remove.
+    }
   }
 }
 

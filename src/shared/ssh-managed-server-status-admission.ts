@@ -82,7 +82,8 @@ export function admitSshManagedServerStatus(value: unknown): {
       ...('canLeaveBehind' in value && value.canLeaveBehind === true
         ? { canLeaveBehind: true }
         : {}),
-      ...('held' in value && value.held === true ? { held: true } : {})
+      ...('held' in value && value.held === true ? { held: true } : {}),
+      ...('bridged' in value && value.bridged === true ? { bridged: true } : {})
     }
   }
 }

@@ -72,8 +72,11 @@ export abstract class RemoteRuntimeTerminalBinarySnapshots extends RemoteRuntime
         recordE2eRemoteTerminalInitialSnapshotTruncated()
       }
       // Initial truncation drops retained history, but the latest-screen image remains authoritative.
+      // Why: a recovery the host marks unavailable carries '' that is not the buffer; applying it erases the pane.
       const snapshotApplied =
-        !stream.snapshotOverflowed && (target === 'initial' || info?.truncated !== true)
+        target === 'recovery'
+          ? classifySnapshotAvailability(stream.snapshotOverflowed, info).kind === 'snapshot'
+          : !stream.snapshotOverflowed && (target === 'initial' || info?.truncated !== true)
       const matchesPendingRequest =
         target === 'request' &&
         pendingRequest &&
@@ -102,13 +105,15 @@ export abstract class RemoteRuntimeTerminalBinarySnapshots extends RemoteRuntime
           if (
             pendingRequest.repaintsPane &&
             availability.kind === 'snapshot' &&
-            typeof info?.seq === 'number' &&
-            typeof stream.expectedSeq === 'number' &&
-            info.seq > stream.expectedSeq
+            typeof info?.seq === 'number'
           ) {
-            // Why: the pane repaints through info.seq (output paused while hidden was dropped);
-            // a stale baseline would flag the next chunk as a gap and clear the pane (#22087).
-            stream.expectedSeq = info.seq
+            // Why: the repaint covers the announced pause gap; a later loss must still resync.
+            stream.pausedOutputGapExpected = false
+            if (typeof stream.expectedSeq === 'number' && info.seq > stream.expectedSeq) {
+              // Why: the pane repaints through info.seq (output paused while hidden was dropped);
+              // a stale baseline would flag the next chunk as a gap and clear the pane (#22087).
+              stream.expectedSeq = info.seq
+            }
           }
           pendingRequest.resolve({
             availability,
@@ -166,6 +171,7 @@ export abstract class RemoteRuntimeTerminalBinarySnapshots extends RemoteRuntime
           stream.expectedSeq = typeof info?.seq === 'number' ? info.seq : undefined
           stream.commandProbeBaselineSeq = undefined
           stream.recoverySnapshotSeq = typeof info?.seq === 'number' ? info.seq : undefined
+          stream.pausedOutputGapExpected = false
           stream.resyncAttempts = 0
           stream.resyncInFlight = false
           stream.resyncPendingSend = false

@@ -22,7 +22,7 @@ import {
 
 import { TRANSPORT_CONNECT_SETTLE_GRACE_MS } from './pty-connect-limits'
 import { buildPaneTransportOptions } from './pane-transport-options'
-import { createUnservedSshPaneTransport } from './unserved-ssh-pane-connect'
+import { createUnservedSshRowTransport } from './unserved-ssh-pane-connect'
 import { createLegacyRelayBridgeTransport } from '../legacy-relay-bridge-transport'
 import { legacyRelayBridgePtyIdForPane } from '../legacy-relay-bridge-panes'
 
@@ -56,7 +56,7 @@ export function installPtyInputRecovery(session: ConnectPanePtySession): void {
             : 'Workspace host is still loading. Retry when the project finishes hydrating.'
         )
       : session.unservedSshTargetId
-        ? createUnservedSshPaneTransport()
+        ? createUnservedSshRowTransport(session, session.unservedSshTargetId)
         : session.runtimeEnvironmentId
           ? withLegacyRelayBridge(
               session,
@@ -258,7 +258,13 @@ export function installPtyInputRecovery(session: ConnectPanePtySession): void {
       // Why only the rejected path: it is the only one whose remount can land on
       // a fresh shell. A stalled-pipeline remount always reattaches to the same
       // shell, so its half-typed line is still on screen and intact.
-      endpointReplaced: providerRejected
+      endpointReplaced: providerRejected,
+      // Why every pane, read at admission: one remount rebuilds them all, a sibling's late
+      // request goes stale, and typing can land while the liveness probe is still pending.
+      hasUndeliveredInput: () =>
+        [...session.deps.paneTransportsRef.current.values()].some(
+          (transport) => transport.hasUndeliveredInput?.() === true
+        )
     })
   }
   // Why: the write-pipeline health watch (scheduler stall probe, replay-guard

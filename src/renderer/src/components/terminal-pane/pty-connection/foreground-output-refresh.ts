@@ -178,6 +178,13 @@ export function bindForegroundOutputRefresh(session: ConnectPanePtySession): voi
         session.dropSideEffectFactConsumer()
       }
     }
+    // COMPAT(legacy-relay-bridge): main drops a hidden bridged pane's output and re-reads its relay screen on reveal.
+    if (ptyId && ptyId === session.legacyRelayBridgePtyId) {
+      session.transport.setOutputPaused?.(
+        !session.disposed && !shouldWritePtyOutputForeground(session.deps.isVisibleRef.current)
+      )
+      return
+    }
     if (isRemoteRuntimePtyId(ptyId) && session.canUseHiddenOutputSnapshot(ptyId)) {
       session.transport.setOutputPaused?.(
         !session.disposed && !shouldWritePtyOutputForeground(session.deps.isVisibleRef.current)

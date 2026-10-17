@@ -80,7 +80,11 @@ import {
 } from './ssh-reconnect-error-classification'
 import { SshReconnectLadder } from './ssh-reconnect-ladder'
 import { mayUserSshConfigClaimAlias } from './ssh-config-alias-claim'
-import { getPassphrasePrivateKeyPath } from './ssh-private-key-authentication'
+import {
+  didDeferKeyboardInteractive,
+  didOfferKeyboardInteractive,
+  getPassphrasePrivateKeyPath
+} from './ssh-private-key-authentication'
 import {
   requiresSystemSshForSecurityKey,
   shouldUseSystemSshTransport
@@ -733,6 +737,32 @@ export class SshConnection {
                 )
               ) {
                 return
+              }
+            }
+            // Why: a strict MaxAuthTries host can drop the key retry before it reaches the challenge
+            // the agent-first attempt held back for that key, so offer the challenge on its own.
+            if (
+              isAgentFallbackError(authError) &&
+              didDeferKeyboardInteractive(config) &&
+              !didOfferKeyboardInteractive(keyConfig)
+            ) {
+              const challengeConfig = buildConnectConfig(this.target, resolved, {
+                keyboardInteractiveOnly: true
+              })
+              this.respawnProxy(challengeConfig, effectiveProxy, connectGeneration)
+              try {
+                await this.doSsh2Connect(challengeConfig, connectGeneration)
+                return
+              } catch (challengeErr) {
+                if (
+                  !(challengeErr instanceof Error) ||
+                  isHostKeyVerificationError(challengeErr) ||
+                  this.keyboardInteractiveCancelled
+                ) {
+                  this.killProxyIfCurrent(connectGeneration)
+                  throw challengeErr
+                }
+                authError = challengeErr
               }
             }
           }

@@ -1,6 +1,7 @@
-import { spawn, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
+import { startServeSignalProcess } from './serve-init-signal-process.test-fixture'
 import {
   SERVE_INIT_REAPER_SCRIPT,
   reexecServeUnderInitReaper,
@@ -128,55 +129,43 @@ describe.skipIf(!bash || process.platform !== 'linux')('serve init reaper script
   })
 
   it('exits with the status the served command chose after a forwarded signal', async () => {
+    const deadline = Date.now() + 20_000
     // Why repeated: the trap interrupting `wait` races the child's exit.
     for (let attempt = 0; attempt < 20; attempt++) {
-      const child = spawn(
+      const child = startServeSignalProcess(
         bash!,
-        [
-          '-c',
-          SERVE_INIT_REAPER_SCRIPT,
-          'init',
-          bash!,
-          '-c',
-          "trap 'exit 0' TERM; echo ready; while :; do sleep 0.01; done"
-        ],
-        { stdio: ['ignore', 'pipe', 'inherit'] }
-      )
-      await new Promise<void>((resolve) => child.stdout.once('data', () => resolve()))
-      child.kill('SIGTERM')
-      const code = await new Promise<number | null>((resolve) => child.once('exit', resolve))
-      expect(code).toBe(0)
-    }
-  })
-
-  it.each(['SIGINT', 'SIGTERM'] as const)('forwards %s to the served command', async (signal) => {
-    const child = spawn(
-      bash!,
-      [
-        '-c',
         SERVE_INIT_REAPER_SCRIPT,
-        'init',
+        `trap 'exit 0' TERM; printf 'ready:%s\\n' "$$"; while :; do sleep 0.01; done`
+      )
+      try {
+        await child.ready('SIGTERM', Math.min(deadline, Date.now() + 5000))
+        const result = await child.signalAndWait('SIGTERM', Math.min(deadline, Date.now() + 5000))
+        expect(result.exit).toEqual({ code: 0, signal: null })
+      } finally {
+        await child.dispose()
+      }
+    }
+  }, 30_000)
+
+  it.each(['SIGINT', 'SIGTERM'] as const)(
+    'forwards %s to the served command',
+    async (signal) => {
+      const child = startServeSignalProcess(
         bash!,
-        '-c',
-        `trap 'echo caught; exit 5' ${signal.slice(3)}; echo ready; while :; do sleep 0.05; done`
-      ],
-      { stdio: ['ignore', 'pipe', 'inherit'] }
-    )
-    let stdout = ''
-    child.stdout.setEncoding('utf8')
-    await new Promise<void>((resolve) => {
-      child.stdout.on('data', (chunk: string) => {
-        stdout += chunk
-        if (stdout.includes('ready')) {
-          resolve()
-        }
-      })
-    })
-    child.kill(signal)
-    const code = await new Promise<number | null>((resolve) => child.once('exit', resolve))
-    expect(stdout).toContain('caught')
-    expect(code).toBe(5)
-  })
+        SERVE_INIT_REAPER_SCRIPT,
+        `trap 'echo caught; exit 5' ${signal.slice(3)}; printf 'ready:%s\\n' "$$"; while :; do sleep 0.05; done`
+      )
+      try {
+        await child.ready(signal, Date.now() + 5000)
+        const result = await child.signalAndWait(signal, Date.now() + 5000)
+        expect(result.stdout.split('\n')).toContain('caught')
+        expect(result.exit).toEqual({ code: 5, signal: null })
+      } finally {
+        await child.dispose()
+      }
+    },
+    15_000
+  )
 
   const canUnsharePid =
     process.platform === 'linux' &&

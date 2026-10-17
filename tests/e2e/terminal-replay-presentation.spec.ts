@@ -57,9 +57,18 @@ for (const scenario of [
     )
     const screen = orcaPage.locator('[data-replay-paint-probe="true"]')
     const input = screen.locator('.xterm-helper-textarea')
-    await (scenario.gpu === 'on'
-      ? expect.poll(() => screen.locator('canvas').count()).toBeGreaterThan(0)
-      : expect(screen.locator('.xterm-rows')).toBeVisible())
+    if (scenario.gpu === 'on') {
+      const webglAttached = await screen
+        .locator('canvas')
+        .first()
+        .waitFor({ state: 'attached', timeout: 10_000 })
+        .then(() => true)
+        .catch(() => false)
+      // Why: headless Linux CI (xvfb, no GPU) falls back to the DOM renderer.
+      test.skip(!webglAttached, 'WebGL renderer is unavailable in this environment')
+    } else {
+      await expect(screen.locator('.xterm-rows')).toBeVisible()
+    }
     await expect(input).toBeFocused()
     // Why: feature-tip tooltips can overlap the screen clip and change between captures.
     await orcaPage.addStyleTag({

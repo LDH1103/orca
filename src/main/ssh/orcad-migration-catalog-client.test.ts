@@ -32,6 +32,7 @@ vi.mock('../../shared/remote-runtime-client', () => ({
 const {
   abortRemoteOrcadMigrationCatalog,
   commitRemoteOrcadMigrationCatalog,
+  listRemoteOrcadRepositories,
   readRemoteOrcadMigrationCatalogState,
   stageRemoteOrcadMigrationCatalog,
   stageRemoteOrcadMigrationSnapshotChunk
@@ -82,6 +83,27 @@ describe('remote orcad migration catalog client', () => {
       }
     }
   )
+
+  it('keeps each server project’s execution host, so a nested SSH row is never read as local', async () => {
+    sendRequest.mockResolvedValue({
+      ok: true,
+      result: {
+        repos: [
+          { id: 'own', path: '/root/a', connectionId: null, displayName: 'own' },
+          { id: 'nested', path: '/root/b', connectionId: 'ssh-nested' },
+          { id: 'runtime', path: '/root/c', executionHostId: 'runtime:env' },
+          // An older orcad row: no host fields at all.
+          { id: 'legacy', path: '/root/d' }
+        ]
+      }
+    })
+    await expect(listRemoteOrcadRepositories(pairingCode)).resolves.toEqual([
+      { id: 'own', path: '/root/a' },
+      { id: 'nested', path: '/root/b', connectionId: 'ssh-nested' },
+      { id: 'runtime', path: '/root/c', executionHostId: 'runtime:env' },
+      { id: 'legacy', path: '/root/d' }
+    ])
+  })
 
   it('pins snapshot acknowledgments to the admitted destination runtime', async () => {
     const request = {

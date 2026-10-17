@@ -17,11 +17,10 @@ export const LOCAL_STORAGE_MODULE_DISPOSITIONS: Record<string, WslMoveFieldDispo
     disposition: 'rewrite-desktop',
     item: 43
   },
-  'src/renderer/src/lib/structured-agent-session-launch-persistence.ts': {
-    disposition: 'rewrite-desktop',
-    item: 44,
-    note: 'The payload fingerprint hashes the worktree, so a rewritten record re-derives it.'
-  },
+  'src/renderer/src/lib/structured-agent-session-launch-persistence.ts': notApplicableDisposition(
+    44,
+    'Chats stay local on the desktop (owner decision C), so their launch records stay as written.'
+  ),
   'src/renderer/src/components/editor/file-view-preference-storage.ts': {
     disposition: 'rewrite-desktop',
     item: 72,
@@ -98,6 +97,7 @@ export const LOCAL_STORAGE_MODULE_DISPOSITIONS: Record<string, WslMoveFieldDispo
 export const SQLITE_SCHEMA_FILE_DATABASES: Record<string, string> = {
   'src/main/ai-vault-search/session-search-query-schema.ts': 'ai-vault-search',
   'src/main/ai-vault-search/session-search-schema.ts': 'ai-vault-search',
+  'src/main/ai-vault/session-parse-cache-database.ts': 'ai-vault-parse-cache',
   'src/main/browser/browser-cookie-staged-import.ts': 'browser-cookie-import',
   'src/main/native-chat/agent-session-attachments/agent-session-attachment-claims.ts':
     'agent-session-journal',
@@ -151,10 +151,10 @@ export const SQLITE_TABLE_DISPOSITIONS: Record<string, WslMoveFieldDisposition> 
         'journal_set_aside',
         'queued_messages'
       ],
-      moveDisposition(52, {
-        newManifestSection: true,
-        note: 'Native chat journal: scoped records move to the host, location rewritten.'
-      })
+      notApplicableDisposition(
+        52,
+        'Native chat journal: chats stay local on the desktop (owner decision C), never moved.'
+      )
     ),
     ...tables(
       'orchestration',
@@ -216,6 +216,11 @@ export const SQLITE_TABLE_DISPOSITIONS: Record<string, WslMoveFieldDisposition> 
       'ai-vault-search',
       ['files', 'messages', 'messages_fts', 'messages_vocab', 'meta', 'sessions'],
       notApplicableDisposition(57, 'AI Vault search index; rebuilt from transcripts.')
+    ),
+    ...tables(
+      'ai-vault-parse-cache',
+      ['meta', 'rows'],
+      notApplicableDisposition(57, 'Session History parse cache; rebuilt from transcripts.')
     ),
     ...tables(
       'browser-cookie-import',

@@ -13,6 +13,7 @@ import {
 } from '../slices/terminal-tab-retirement'
 import type { TerminalSlice, TerminalStoreGet, TerminalStoreSet } from './terminal-state'
 import { startTerminalTabProviderRetirement } from './terminal-tab-close-providers'
+import { stopLegacyRelayBridgedShellsForTab } from './legacy-relay-bridged-tab-close'
 import { commitTerminalSurfaceClose } from './terminal-surface-close-intent'
 import { recordTerminalTabCloseThroughLayoutOwner } from './terminal-tab-close-layout-owner'
 import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../../shared/layout-owner-switch'
@@ -51,6 +52,10 @@ export function createTerminalTabCloseActions(
           state: get(),
           tabId
         })
+        if (opts?.localPtyTeardownOwnedExternally !== true) {
+          // Why regardless of a host-owned close: the managed server never ran a relay-era shell.
+          void stopLegacyRelayBridgedShellsForTab(get(), tabId, retirementPlan)
+        }
       }
       settleAttentionRemovedBy(set, get, () =>
         set((s) => {
@@ -148,7 +153,6 @@ export function createTerminalTabCloseActions(
           const nextNativeChatLaunchPromptByTabId = omitByTabId(s.nativeChatLaunchPromptByTabId)
           const nextNativeChatLaunchDraftByTabId = omitByTabId(s.nativeChatLaunchDraftByTabId)
           const nextPendingInitialCwdByTabId = omitByTabId(s.pendingInitialCwdByTabId)
-          const nextPendingSetupSplitByTabId = omitByTabId(s.pendingSetupSplitByTabId)
           const nextPendingIssueCommandSplitByTabId = omitByTabId(s.pendingIssueCommandSplitByTabId)
           // Why: cache timer keys are `${tabId}:${leafId}` composites; remove all entries for the closing tab.
           const nextCacheTimer = removePaneKeysByTabPrefix(s.cacheTimerByKey, tabId)
@@ -223,7 +227,6 @@ export function createTerminalTabCloseActions(
             nativeChatLaunchPromptByTabId: nextNativeChatLaunchPromptByTabId,
             nativeChatLaunchDraftByTabId: nextNativeChatLaunchDraftByTabId,
             pendingInitialCwdByTabId: nextPendingInitialCwdByTabId,
-            pendingSetupSplitByTabId: nextPendingSetupSplitByTabId,
             pendingIssueCommandSplitByTabId: nextPendingIssueCommandSplitByTabId,
             cacheTimerByKey: nextCacheTimer,
             tabBarOrderByWorktree: nextTabBarOrderByWorktree,

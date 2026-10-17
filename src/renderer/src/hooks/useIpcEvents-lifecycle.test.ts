@@ -123,6 +123,10 @@ describe('useIpcEvents App-lifetime lifecycle', () => {
     })
 
     const { installAppLifetimeIpcEvents } = await import('./ipc-events/app-lifetime-ipc-bridge')
+    // Module-owned subscriptions outlive each app bridge installation.
+    const moduleListeners = new Map(listeners)
+    listeners.clear()
+    registrationOrder.length = 0
     vi.stubGlobal('document', documentEvents)
     const firstCleanup = installAppLifetimeIpcEvents()
     await Promise.resolve()
@@ -202,6 +206,11 @@ describe('useIpcEvents App-lifetime lifecycle', () => {
     expect(
       [...listeners.values()].every((records) =>
         records.every((item) => item.cleanup.mock.calls.length === 1)
+      )
+    ).toBe(true)
+    expect(
+      [...moduleListeners.values()].every((records) =>
+        records.every((item) => item.active && item.cleanup.mock.calls.length === 0)
       )
     ).toBe(true)
   })

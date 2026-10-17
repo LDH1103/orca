@@ -165,7 +165,7 @@ describe('electron-builder config', () => {
 
   // Why: out/electron-dev holds `pnpm dev`'s cached Electron.app copies (~270MB per branch).
   // CI never creates it, so only a local package would have hit this -- silently, as bulk.
-  it('keeps cached dev Electron bundles out of app.asar', () => {
+  it('keeps cached dev Electron bundles and Vite dependencies out of app.asar', () => {
     const matcher = new FileMatcher('/app', '/dest', (value) => value, electronBuilderConfig.files)
     matcher.prependPattern('**/*')
     const isPacked = matcher.createFilter()
@@ -173,7 +173,10 @@ describe('electron-builder config', () => {
 
     for (const devBundlePath of [
       'out/electron-dev/1a2b3c4d5e6f/Orca: dev.app/Contents/MacOS/Electron',
-      'out/electron-dev/1a2b3c4d5e6f/orca-dev-electron-app.json'
+      'out/electron-dev/1a2b3c4d5e6f/orca-dev-electron-app.json',
+      '.cache/vite/renderer/deps/react.js',
+      '.cache/vite/web/deps/react.js',
+      '.cache/vite.lock/owner'
     ]) {
       expect(packs(devBundlePath)).toBe(false)
     }

@@ -58,6 +58,7 @@ type TerminalMenuState = {
   paneCount: number
   menuPaneId: number | null
   onContextMenuCapture: (event: React.MouseEvent<HTMLDivElement>) => void
+  onMouseDownCapture: (event: React.MouseEvent<HTMLDivElement>) => void
   onPaneTitleContextMenu: (event: React.MouseEvent<HTMLElement>, paneId: number) => void
   onCopy: () => Promise<void>
   onSelectAll: () => void
@@ -132,14 +133,21 @@ export function useTerminalPaneContextMenu({
       source
     )
 
-  const { open, setOpen, point, menuOpenedAtRef, onContextMenuCapture, onPaneTitleContextMenu } =
-    useTerminalContextMenuTrigger({
-      managerRef,
-      containerRef,
-      contextPaneIdRef,
-      rightClickToPaste,
-      pasteResolvedPane
-    })
+  const {
+    open,
+    setOpen,
+    point,
+    menuOpenedAtRef,
+    onContextMenuCapture,
+    onMouseDownCapture,
+    onPaneTitleContextMenu
+  } = useTerminalContextMenuTrigger({
+    managerRef,
+    containerRef,
+    contextPaneIdRef,
+    rightClickToPaste,
+    pasteResolvedPane
+  })
 
   const { onSplitRight, onSplitDown } = useTerminalPaneSplitActions({
     managerRef,
@@ -297,6 +305,7 @@ export function useTerminalPaneContextMenu({
     paneCount,
     menuPaneId,
     onContextMenuCapture,
+    onMouseDownCapture,
     onPaneTitleContextMenu,
     onCopy,
     onSelectAll,

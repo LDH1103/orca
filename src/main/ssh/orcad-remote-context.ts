@@ -12,13 +12,14 @@ import {
 } from './orcad-host-transport'
 import {
   decideOrcadMachineHome,
-  orcadMachineClaimCommand,
   orcadMachineDataRoot,
   orcadMachineHomeDir,
   orcadMachineHomeProbeCommand,
+  orcadMachineOwnershipUnresolvedMessage,
   parseOrcadMachineClaim,
   parseOrcadMachineHomeProbe
 } from './orcad-machine-home'
+import { orcadMachineClaimCommand } from './orcad-machine-claim-command'
 import { execOrcadRemote, type OrcadRemoteExecTarget } from './orcad-remote-runtime-control'
 import { readRemoteHomeCommand } from './ssh-remote-commands'
 import { shellEscape } from './ssh-connection-utils'
@@ -127,6 +128,15 @@ export async function resolveOrcadMachineHome(
   )
   const { loginHome } = probe
   let decision = decideOrcadMachineHome(probe, host)
+  if (decision.kind === 'unresolved') {
+    throw new Error(
+      orcadMachineOwnershipUnresolvedMessage(
+        decision.machineKey,
+        probe.identity?.hostname ?? null,
+        decision.cause
+      )
+    )
+  }
   if (decision.kind === 'claim') {
     const won = parseOrcadMachineClaim(
       (

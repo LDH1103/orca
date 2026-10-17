@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -141,6 +141,96 @@ describe('SshConnection', () => {
       vi.mocked(utils.parseKey).mockReset()
       rmSync(tempDir, { recursive: true, force: true })
     }
+  })
+
+  describe('when the agent-first attempt held the challenge back for ~/.ssh/id_ed25519', () => {
+    let tempDir: string
+    const hostMethods = ['publickey' as const, 'keyboard-interactive' as const]
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+    beforeEach(async () => {
+      vi.stubEnv('SSH_AUTH_SOCK', '/tmp/agent.sock')
+      tempDir = mkdtempSync(join(tmpdir(), 'orca-ssh-home-'))
+      mkdirSync(join(tempDir, '.ssh'))
+      // Real key bytes and parser: deferral requires the waiting key to parse as unencrypted.
+      const realSsh2 = await vi.importActual<{ utils: typeof utils }>('ssh2')
+      writeFileSync(
+        join(tempDir, '.ssh', 'id_ed25519'),
+        realSsh2.utils.generateKeyPairSync('ecdsa', { bits: 256 }).private
+      )
+      vi.mocked(utils.parseKey).mockImplementation(realSsh2.utils.parseKey)
+      vi.stubEnv('HOME', tempDir)
+      vi.stubEnv('USERPROFILE', tempDir)
+    })
+
+    afterEach(() => {
+      vi.mocked(utils.parseKey).mockReset()
+      rmSync(tempDir, { recursive: true, force: true })
+    })
+
+    /** Runs the agent-first attempt to its skipped challenge and fails it, leaving the key retry. */
+    async function failAgentFirstAttempt(
+      conn: SshConnection
+    ): Promise<{ connected: Promise<void> }> {
+      const created = nextSshClientCreation()
+      const connected = conn.connect()
+      await created
+      await settle()
+      expect(walkInitialAuthLadder(clientInstances[0].lastConnectConfig, hostMethods)).toEqual([
+        'none',
+        'agent'
+      ])
+      const keyRetryCreated = nextSshClientCreation()
+      emitSshEvent('error', new Error('All configured authentication methods failed'))
+      await keyRetryCreated
+      await settle()
+      // Wrapped: an async function returning the promise itself would wait for the whole connect.
+      return { connected }
+    }
+
+    it('offers the challenge alone when a MaxAuthTries=1 host drops the key retry first', async () => {
+      ssh2Mock.connectSequence = ['silent', 'silent', 'ready']
+      const onCredentialRequest = vi.fn()
+      const conn = new SshConnection(createTarget(), createCallbacks({ onCredentialRequest }))
+
+      const { connected } = await failAgentFirstAttempt(conn)
+      // The host disconnects after the rejected key, before the retry reaches keyboard-interactive.
+      expect(walkInitialAuthLadder(clientInstances[1].lastConnectConfig, hostMethods, 2)).toEqual([
+        'none',
+        'publickey'
+      ])
+      const challengeCreated = nextSshClientCreation()
+      emitSshEvent('error', new Error('Received disconnect: Too many authentication failures'))
+      await challengeCreated
+      await connected
+
+      expect(clientInstances).toHaveLength(3)
+      const challengeConfig = clientInstances[2].lastConnectConfig
+      expect(challengeConfig).not.toHaveProperty('agent')
+      expect(challengeConfig).not.toHaveProperty('privateKey')
+      expect(walkInitialAuthLadder(challengeConfig, hostMethods)).toEqual([
+        'none',
+        'keyboard-interactive'
+      ])
+      expect(onCredentialRequest).not.toHaveBeenCalled()
+    })
+
+    it('does not repeat the challenge when the key retry already offered it', async () => {
+      ssh2Mock.connectSequence = ['silent', 'silent']
+      const onCredentialRequest = vi.fn(async () => null)
+      const conn = new SshConnection(createTarget(), createCallbacks({ onCredentialRequest }))
+
+      const { connected } = await failAgentFirstAttempt(conn)
+      expect(walkInitialAuthLadder(clientInstances[1].lastConnectConfig, hostMethods)).toEqual([
+        'none',
+        'publickey',
+        'keyboard-interactive'
+      ])
+      emitSshEvent('error', new Error('All configured authentication methods failed'))
+
+      await expect(connected).rejects.toThrow('All configured authentication methods failed')
+      expect(clientInstances).toHaveLength(2)
+    })
   })
 
   it('falls back to direct private key auth when the agent socket is unavailable', async () => {

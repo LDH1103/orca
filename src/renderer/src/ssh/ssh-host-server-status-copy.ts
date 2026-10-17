@@ -9,6 +9,7 @@ import type {
 import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
 import { launchSessionEndedLine } from './ssh-host-launch-session-copy'
+import { bridgedTerminalsLine } from './ssh-host-bridged-terminals-copy'
 
 export type SshHostServerStatusLine = {
   text: string
@@ -52,7 +53,10 @@ export function sshHostServerStatusLine(
     return { tone: 'muted', text: settingUpLabel(status.phase) }
   }
   if (status?.kind === 'relay') {
-    return unservedLine(status)
+    // An unverifiable bridged terminal keeps the unverifiable line: nothing proves it still answers.
+    return status.bridged && status.reason === 'relay_terminals_live'
+      ? bridgedTerminalsLine(status.detail)
+      : unservedLine(status)
   }
   if (target.managedServerUnavailable) {
     return unavailableLine(target.managedServerUnavailable.reason)

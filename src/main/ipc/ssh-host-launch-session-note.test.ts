@@ -104,6 +104,19 @@ describe('noteEndedLaunchSshSession', () => {
     expect(mocks.publish).toHaveBeenCalledOnce()
   })
 
+  it('drops an ended answer that a relaunch during the probe made stale', async () => {
+    mocks.read.mockImplementationOnce(async () => {
+      forgetLaunchSessionVerdict('ssh-1')
+      return 'exited'
+    })
+    await noteEndedLaunchSshSession('ssh-1', 'env-1')
+    expect(mocks.publish).not.toHaveBeenCalled()
+    mocks.read.mockResolvedValue('live')
+    await noteEndedLaunchSshSession('ssh-1', 'env-1')
+    expect(mocks.read).toHaveBeenCalledTimes(2)
+    expect(mocks.publish).not.toHaveBeenCalled()
+  })
+
   it('probes again once a live verdict is old', async () => {
     let clock = 0
     mocks.read.mockResolvedValue('live')

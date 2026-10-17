@@ -1,3 +1,4 @@
+import type { MobileSessionView } from '../storage/session-view-preferences'
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import type {
   AskAnswerSelection,
@@ -24,6 +25,7 @@ import type { MobileNativeChatVisualSource } from './mobile-native-chat-visual-r
 export type MobileNativeChatController = {
   /** Whether a tab's effective view is chat (per-tab override, else the default). */
   isTabChatView: (tabId: string) => boolean
+  setTabView: (tabId: string, view: MobileSessionView) => void
   toggleTabChatView: (tabId: string) => void
   showNativeChat: boolean
   showNativeChatRef: MutableRefObject<boolean>

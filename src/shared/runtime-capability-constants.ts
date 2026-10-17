@@ -97,6 +97,10 @@ export const SESSION_TABS_RETIREMENT_PROOF_DELTA_RUNTIME_CAPABILITY =
 // Why: a client advertising this rebuilds each `updated` frame's tab list from the previous frame
 // on the same stream, so one tab's status change no longer re-sends every tab in the worktree.
 export const SESSION_TABS_TAB_DELTA_RUNTIME_CAPABILITY = 'session-tabs.tab-delta.v1' as const
+// Why: a client advertising this reads `restoredUnconfirmed` agent rows as unverifiable; older
+// clients would read their last known state as live, so they keep the legacy `done` projection.
+export const AGENT_STATUS_RESTORED_UNCONFIRMED_RUNTIME_CAPABILITY =
+  'agent-status.restored-unconfirmed.v1' as const
 export const AGENT_SESSION_BOUNDARY_RUNTIME_CAPABILITY =
   'agent-session.session-boundary.v1' as const
 export const AGENT_SESSION_HOST_AUTHORITY_RUNTIME_CAPABILITY =
@@ -186,6 +190,9 @@ export const AGENT_SESSION_REWIND_RECOVERY_CAPABILITY = 'agent-session.rewind-re
 // status form to clients that do not advertise this. Transitional: drop the downgrade once no
 // supported release lacks the capability.
 export const AGENT_SESSION_TURN_ITEM_CAPABILITY = 'agent-session.turn-item.v1' as const
+/** The client retires acknowledged echoes even when a catch-up snapshot skips their rows. */
+export const AGENT_SESSION_SNAPSHOT_CATCH_UP_CLIENT_CAPABILITY =
+  'agent-session.snapshot-catch-up.v1' as const
 export const AGENT_SESSION_BACKGROUND_TASK_STOP_CAPABILITY =
   'agent-session.background-task-stop.v1' as const
 // Why: agentSession.respondToQuestion has a strict schema, so clients must not send structured

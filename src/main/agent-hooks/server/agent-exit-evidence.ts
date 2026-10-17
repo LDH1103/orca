@@ -80,6 +80,30 @@ export function claimsPaneAfterExit(
   )
 }
 
+/** Drops one retired key; a pane that moved away keeps the exit under its surviving keys. */
+export function releaseAgentExitKey(
+  exits: Map<string, AgentExitEvidence>,
+  paneKey: string
+): boolean {
+  const exit = exits.get(paneKey)
+  exit?.paneKeys.delete(paneKey)
+  return exits.delete(paneKey)
+}
+
+/** Drops exits proven before `notBefore` unless a retained row still names one of their panes. */
+export function pruneAgentExits(
+  exits: Map<string, AgentExitEvidence>,
+  notBefore: number,
+  isPaneRowRetained: (paneKey: string) => boolean
+): void {
+  for (const [key, exit] of exits) {
+    // Why: a kept resume row without its exit would read as a live session holder.
+    if (exit.at < notBefore && ![...exit.paneKeys].some(isPaneRowRetained)) {
+      exits.delete(key)
+    }
+  }
+}
+
 export function serializeAgentExits(
   exits: ReadonlyMap<string, AgentExitEvidence>
 ): PersistedAgentExitEvidence[] {

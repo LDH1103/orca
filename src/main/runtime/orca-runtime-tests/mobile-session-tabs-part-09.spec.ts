@@ -301,11 +301,12 @@ describe('OrcaRuntimeService', () => {
       expect(tap.spawn.mock.calls[0]?.[0]).toMatchObject({ spawnIntent: 'user-resume' })
     })
 
-    function makeRuntimeWithOtherPaneHolder(livePtyIds: string[]) {
+    function makeRuntimeWithOtherPaneHolder(ptyIds: string[], verdict?: 'exited' | 'unverifiable') {
       const { runtimeStore } = makeParkedSessionStore('worktree-sleep')
       const parked = makeParkedRuntime(runtimeStore, {
-        livePtyIds,
+        livePtyIds: ptyIds,
         deps: {
+          checkHookAgentPresence: async () => verdict ?? null,
           getAgentProviderSessionSnapshot: () => [
             // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the resume guard reads only paneKey and providerSession.
             {
@@ -328,6 +329,16 @@ describe('OrcaRuntimeService', () => {
       await userActivate(runtime)
 
       expect(firstSpawnArgs(spawn).command ?? '').not.toContain('provider-session-1')
+    })
+
+    // Why: the agent can exit to a shell that keeps the PTY alive; only the hook store proves that.
+    it.each([
+      ['exited', true],
+      ['unverifiable', false]
+    ] as const)('live-PTY holder agent %s: resumes %s', async (verdict, resumes) => {
+      const { runtime, spawn } = makeRuntimeWithOtherPaneHolder(['other-pty'], verdict)
+      await userActivate(runtime)
+      expect((firstSpawnArgs(spawn).command ?? '').includes('provider-session-1')).toBe(resumes)
     })
 
     // Why: losing sight of the holder (a dropped SSH relay) is not evidence it stopped writing.

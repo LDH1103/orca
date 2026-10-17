@@ -1,8 +1,9 @@
 import { resolveEnvironment } from '../../shared/runtime-environment-store'
 import {
   getOrcadSshDeployment,
-  isWslHostRuntimeEnvironment
+  type KnownRuntimeEnvironment
 } from '../../shared/runtime-environments'
+import { classifyRuntimeEnvironmentHost } from '../../shared/runtime-environment-host-kind'
 import type {
   SshManagedServerStatus,
   SshManagedServerUpdateNote,
@@ -34,11 +35,23 @@ export async function resolveManagedRuntimeEnvironment(
   const environment = resolveEnvironment(userDataPath, selector)
   // Every call, subscription and status probe passes here, so a gated-off WSL host is never reached.
   assertWslHostReachable(environment)
-  if (isWslHostRuntimeEnvironment(environment)) {
-    // Reached over the wsl.exe bridge; connects only when an open project or terminal needs it.
-    await getWslHostService()?.ensureForRuntimeCall(environment.id)
-    return resolveEnvironment(userDataPath, environment.id)
+  const host = classifyRuntimeEnvironmentHost(environment)
+  switch (host.kind) {
+    case 'wsl':
+      // Reached over the wsl.exe bridge; connects only when an open project or terminal needs it.
+      await getWslHostService()?.ensureForRuntimeCall(environment.id)
+      break
+    case 'network':
+      await prepareNetworkServerForCall(userDataPath, environment)
+      break
   }
+  return resolveEnvironment(userDataPath, environment.id)
+}
+
+async function prepareNetworkServerForCall(
+  userDataPath: string,
+  environment: KnownRuntimeEnvironment
+): Promise<void> {
   await ensureOrcadManagedTunnel(userDataPath, environment.id)
   // Why: a server that stopped (idle, killed, host rebooted) starts before the call that needs it.
   const serving = await verifyOrcadManagedServing(userDataPath, environment.id)
@@ -53,6 +66,10 @@ export async function resolveManagedRuntimeEnvironment(
   if (isStoppedElsewhere(serving)) {
     // Why awaited: this call needs the server, and another desktop's stop can land mid-session.
     if (await redeployStoppedManagedOrcad(environment.id, createDeps)) {
+      const targetId = getOrcadSshDeployment(environment)?.sshTargetId
+      if (targetId) {
+        await forgetLaunchSessionVerdictLazily(targetId)
+      }
       // Why rebuild: the redeployed server may bind another port than the reused forward targets.
       await rebuildOrcadManagedTunnel(userDataPath, environment.id)
     }
@@ -71,7 +88,13 @@ export async function resolveManagedRuntimeEnvironment(
         .catch(() => {})
     }
   }
-  return resolveEnvironment(userDataPath, environment.id)
+}
+
+/** This session relaunched the server, so a cached "launch session ended" verdict is stale. */
+async function forgetLaunchSessionVerdictLazily(targetId: string): Promise<void> {
+  // Why lazy: the note module publishes through this one.
+  const { forgetLaunchSessionVerdict } = await import('./ssh-host-launch-session-note')
+  forgetLaunchSessionVerdict(targetId)
 }
 
 function isStoppedElsewhere(serving: OrcadManagedServing): boolean {
@@ -97,12 +120,16 @@ export function installManagedOrcadStartStatus(): void {
   setManagedOrcadStartListener({
     starting: (target) =>
       publishHostServerStatus(target.id, { kind: 'setting-up', phase: 'starting' }),
-    settled: (target, environmentId, serving) =>
+    settled: (target, environmentId, serving) => {
+      if (serving.state === 'started') {
+        void forgetLaunchSessionVerdictLazily(target.id).catch(() => {})
+      }
       publishHostServerStatus(target.id, {
         kind: 'managed',
         environmentId,
         ...(serving.state === 'unverifiable' ? { serving } : {})
       })
+    }
   })
 }
 

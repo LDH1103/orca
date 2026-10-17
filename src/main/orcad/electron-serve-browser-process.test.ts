@@ -4,12 +4,30 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import type * as RunProcessModule from '@orca/process-host'
+import type * as FsPromisesModule from 'node:fs/promises'
 import type { RuntimeBrowserCommandHost } from '../runtime/browser/browser-command-contracts'
 
-const { spawnProcessMock } = vi.hoisted(() => ({
-  spawnProcessMock: vi.fn<(spec: ProcessSpec) => ReturnType<typeof RunProcessModule.spawnProcess>>()
+const { spawnProcessMock, lockedRemovalPaths } = vi.hoisted(() => ({
+  spawnProcessMock:
+    vi.fn<(spec: ProcessSpec) => ReturnType<typeof RunProcessModule.spawnProcess>>(),
+  lockedRemovalPaths: new Set<string>()
 }))
+
+// Stands in for Windows, where the killed sidecar's helpers still hold its profile for a moment.
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromisesModule>()
+  const rm: typeof actual.rm = async (path, options) => {
+    if (lockedRemovalPaths.has(String(path))) {
+      throw Object.assign(new Error(`EBUSY: resource busy or locked, rmdir '${String(path)}'`), {
+        code: 'EBUSY'
+      })
+    }
+    return actual.rm(path, options)
+  }
+  return { ...actual, rm, default: { ...actual, rm } }
+})
 
 // Why wrap rather than fake: the provider must still go through the real spawn
 // path (argv/env handling, a real pid to signal); only the program is swapped
@@ -279,6 +297,31 @@ describe('ElectronServeBrowserProcess start-up', () => {
     expect(existsSync(userDataPath)).toBe(false)
     expect(() => process.kill(metadata.pid, 0)).toThrow()
   })
+
+  it('still stops cleanly when the sidecar profile stays locked after the process exits', async () => {
+    const processHandle = await startProvider()
+    const userDataPath = (spawnSpec().args ?? [])
+      .find((arg) => arg.startsWith('--user-data-dir='))!
+      .slice('--user-data-dir='.length)
+    const metadata = JSON.parse(
+      await readFile(join(userDataPath, 'orca-runtime.json'), 'utf8')
+    ) as { pid: number }
+    lockedRemovalPaths.add(userDataPath)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    try {
+      await expect(processHandle.stop()).resolves.toBeUndefined()
+      expect(warn).toHaveBeenCalledWith(
+        '[orcad] Electron browser sidecar data was not removed:',
+        expect.objectContaining({ code: 'EBUSY' })
+      )
+      expect(() => process.kill(metadata.pid, 0)).toThrow()
+    } finally {
+      lockedRemovalPaths.delete(userDataPath)
+      warn.mockRestore()
+      await rm(userDataPath, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('ElectronServeBrowserProcess command routing', () => {
@@ -407,6 +450,27 @@ describe('ElectronServeBrowserProcess command routing', () => {
     await expect(commands.browserTabCurrent({ worktree: 'wt-a' })).rejects.toMatchObject({
       code: 'browser_no_tab'
     })
+  })
+
+  it('scopes a folder workspace through the browser-workspace resolver', async () => {
+    // The git-only selector cannot name a folder workspace; only the browser resolver can.
+    const folderHost: RuntimeBrowserCommandHost = {
+      ...host,
+      resolveWorktreeSelector: async () => {
+        throw new Error('selector_not_found')
+      },
+      resolveBrowserWorkspace: async () => ({ id: 'folder:docs' })
+    }
+    const commands = (await startProvider()).createCommands(folderHost)
+
+    const created = z
+      .object({ browserPageId: z.string() })
+      .parse(await commands.browserTabCreate({ worktree: 'id:folder:docs' }))
+    await commands.browserGoto({ worktree: 'id:folder:docs', url: 'https://example.test/' })
+
+    const request = (await browserRequests()).at(-1)
+    expect(request?.method).toBe('browser.goto')
+    expect(request?.params.page).toBe(created.browserPageId)
   })
 
   // Why this matters: the runtime advertises browser.tabCreate.known-id.v1

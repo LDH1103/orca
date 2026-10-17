@@ -88,7 +88,7 @@ describe.each(['repo-1::/workspace/repo', 'folder:workspace'])('%s', (worktreeId
     expect(state.pendingStartupByTabId).toEqual({})
   })
 
-  it('still recovers the newer native record and clears its older mirror duplicate', () => {
+  it('does not recover a native record that shares its session with an older mirror', () => {
     const mirrored = makeRecord(worktreeId, makePaneKey(HOST_TAB_ID, LEAF_ID), HOST_TAB_ID)
     const native = {
       ...makeRecord(worktreeId, makePaneKey('native-tab', LEAF_ID), 'native-tab'),
@@ -105,16 +105,14 @@ describe.each(['repo-1::/workspace/repo', 'folder:workspace'])('%s', (worktreeId
       pendingStartupByTabId: {}
     })
 
-    expect(resumeSleepingAgentSessionsForWorktree(worktreeId)).toBe(1)
+    // The mirror may name a transcript its host still writes (#29421); a second sweep must agree.
+    expect(resumeSleepingAgentSessionsForWorktree(worktreeId)).toBe(0)
     expect(resumeSleepingAgentSessionsForWorktree(worktreeId)).toBe(0)
     const state = useAppStore.getState()
-    expect(state.sleepingAgentSessionsByPaneKey).toEqual({})
-    expect(state.tabsByWorktree[worktreeId]).toHaveLength(1)
-    expect(Object.values(state.automaticAgentResumeClaimsByTabId)).toMatchObject([
-      { providerSession: native.providerSession }
-    ])
-    expect(Object.values(state.pendingStartupByTabId)).toMatchObject([
-      { resumeProviderSession: native.providerSession }
-    ])
+    // The mirror speaks for the session; the native sibling is the duplicate.
+    expect(state.sleepingAgentSessionsByPaneKey).toEqual({ [mirrored.paneKey]: mirrored })
+    expect(state.tabsByWorktree[worktreeId]).toEqual([])
+    expect(state.automaticAgentResumeClaimsByTabId).toEqual({})
+    expect(state.pendingStartupByTabId).toEqual({})
   })
 })

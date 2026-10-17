@@ -157,6 +157,41 @@ describe('remote terminal paused-output drop notice', () => {
     }
   })
 
+  // Why: the reveal snapshot covers the announced gap, so a later real loss must still resync.
+  it('detects a real gap after the reveal snapshot covered the announced one', async () => {
+    hostCapabilities = { outputPause: 1, outputPauseDropNotice: 1 }
+    const { data, stream } = await subscribeClient()
+    output('before')
+    stream.setOutputPaused(true)
+    cursor += 'dropped-while-hidden'.length
+    send(TerminalStreamOpcode.PausedOutputDropped, new Uint8Array())
+    stream.setOutputPaused(false)
+    await stream.serializeBufferOutcome({ repaintsPane: true })
+    cursor += 'lost-after-reveal'.length
+    output('after-real-gap')
+
+    expect(data).toEqual(['before'])
+    expect(snapshotRequests).toHaveLength(2)
+    expect(snapshotRequests[1]?.requestId).toBeUndefined()
+  })
+
+  it('detects a real gap after a recovery snapshot covered the announced one', async () => {
+    hostCapabilities = { outputPause: 1, outputPauseDropNotice: 1 }
+    const { data, stream } = await subscribeClient()
+    output('before')
+    stream.setOutputPaused(true)
+    cursor += 'dropped-while-hidden'.length
+    send(TerminalStreamOpcode.PausedOutputDropped, new Uint8Array())
+    stream.setOutputPaused(false)
+    send(TerminalStreamOpcode.SnapshotStart, encodeTerminalStreamJson({ seq: cursor }))
+    send(TerminalStreamOpcode.SnapshotEnd, new Uint8Array())
+    cursor += 'lost-after-recovery'.length
+    output('after-real-gap')
+
+    expect(data).toEqual(['before'])
+    expect(snapshotRequests).toHaveLength(1)
+  })
+
   it('keeps the resync for an older host that does not negotiate drop notices', async () => {
     hostCapabilities = { outputPause: 1 }
     const { data, onPausedOutputDropped, stream } = await subscribeClient()

@@ -72,6 +72,42 @@ describe('live agent-status replay notifications', () => {
     expect(mocks.observe).not.toHaveBeenCalled()
   })
 
+  function seedRow(row: { state: string; stateStartedAt: number }): void {
+    const current = mocks.state.current
+    if (current) {
+      current.agentStatusByPaneKey = {
+        [PANE_KEY]: {
+          paneKey: PANE_KEY,
+          worktreeId: 'wt-1',
+          connectionId: null,
+          agentType: 'claude',
+          updatedAt: 1_700_000_001_000,
+          ...row
+        }
+      }
+    }
+  }
+
+  it('notifies for a replayed done that finished while the host was unreachable', () => {
+    seedRow({ state: 'working', stateStartedAt: 1_699_999_000_000 })
+    const apply = createApplicator()
+
+    expect(apply(status({ isReplay: true }))).toBe('applied')
+
+    expect(mocks.observe).toHaveBeenCalledTimes(1)
+    expect(mocks.observe.mock.calls[0][0]).not.toHaveProperty('seedOnly')
+    expect(mocks.observe.mock.calls[0][0].payload).toHaveProperty('state', 'done')
+  })
+
+  it('does not observe a replay of the done this renderer already shows', () => {
+    seedRow({ state: 'done', stateStartedAt: 1_700_000_000_000 })
+    const apply = createApplicator()
+
+    expect(apply(status({ isReplay: true }))).toBe('applied')
+
+    expect(mocks.observe).not.toHaveBeenCalled()
+  })
+
   it('seeds a replayed working row, and a later real done still notifies', () => {
     const apply = createApplicator()
 

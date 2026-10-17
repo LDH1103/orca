@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AGENT_SESSION_OPTIONAL_MODEL_CLIENT_CAPABILITY } from '../../../../shared/agent-session-optional-model-capability'
 import { ELECTRON_REMOTE_RUNTIME_CLIENT_CAPABILITIES } from '../../../../shared/electron-remote-runtime-client-capabilities'
-import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import {
+  AGENT_SESSION_SNAPSHOT_CATCH_UP_CLIENT_CAPABILITY,
+  STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
+} from '../../../../shared/protocol-version'
+import { AGENT_SESSION_CURRENT_REQUESTS_CLIENT_CAPABILITY } from '../../../../shared/agent-session-current-requests-capability'
 import { remoteRuntimeClientCapabilities } from '../../../../shared/remote-runtime-client-capabilities'
 import { AcpStructuredOptions } from '../../../acp/acp-structured-options'
 import { NewSessionResponseSchema } from '../../../acp/generated/acp-protocol.generated'
@@ -28,12 +32,34 @@ import {
 beforeEach(installStructuredHostStub)
 afterEach(clearStructuredHostStub)
 
+const currentDesktop = {
+  ...STRUCTURED_CLIENT,
+  clientCapabilities: [
+    ...STRUCTURED_CLIENT.clientCapabilities,
+    AGENT_SESSION_SNAPSHOT_CATCH_UP_CLIENT_CAPABILITY,
+    AGENT_SESSION_CURRENT_REQUESTS_CLIENT_CAPABILITY
+  ]
+}
+
 it.each([
   // Being a phone is enough: no capability or param is asked of it.
-  ['a phone of any version', STRUCTURED_MOBILE_CLIENT, true],
-  ['a paired desktop', STRUCTURED_CLIENT, false],
-  ['an in-process reader', undefined, false]
-] as const)('subscribes %s with bounded frames: %s', async (_label, client, bounded) => {
+  ['a phone of any version', STRUCTURED_MOBILE_CLIENT, true, true],
+  ['an older paired desktop', STRUCTURED_CLIENT, false, false],
+  [
+    'a desktop that only settles skipped sends',
+    {
+      ...STRUCTURED_CLIENT,
+      clientCapabilities: [
+        ...STRUCTURED_CLIENT.clientCapabilities,
+        AGENT_SESSION_SNAPSHOT_CATCH_UP_CLIENT_CAPABILITY
+      ]
+    },
+    false,
+    false
+  ],
+  ['an updated paired desktop', currentDesktop, false, true],
+  ['an in-process reader', undefined, false, true]
+] as const)('subscribes %s with bounded frames: %s', async (_label, client, bounded, snapshot) => {
   let input: AgentSessionSubscribeInput | undefined
   hostCalls.subscribe.mockImplementation((opened: AgentSessionSubscribeInput) => {
     input = opened
@@ -42,6 +68,28 @@ it.each([
   })
   await call('agentSession.subscribe', { sessionId: SESSION }, client)
   expect(input?.boundedFrames === true).toBe(bounded)
+  expect(input?.snapshotCatchUp).toBe(snapshot)
+})
+
+it('allows the local desktop renderer to replace a missed gap with a snapshot', async () => {
+  let input: AgentSessionSubscribeInput | undefined
+  hostCalls.subscribe.mockImplementation((opened: AgentSessionSubscribeInput) => {
+    input = opened
+    opened.emit({ type: 'end' })
+    return () => {}
+  })
+  const cursor = { epoch: 'epoch-a', sequence: 10 }
+  await call(
+    'agentSession.subscribe',
+    { sessionId: SESSION, cursor },
+    {
+      clientId: 'desktop-renderer',
+      clientKind: 'runtime',
+      clientCapabilities: [...DESKTOP_RENDERER_RUNTIME_CLIENT_CAPABILITIES]
+    }
+  )
+  expect(input?.cursor).toEqual(cursor)
+  expect(input?.snapshotCatchUp).toBe(true)
 })
 
 describe('agentSession.conversationOutline', () => {

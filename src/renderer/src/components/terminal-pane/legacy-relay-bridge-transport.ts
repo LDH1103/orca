@@ -98,6 +98,12 @@ export function createLegacyRelayBridgeTransport(ptyId: string, inner: PtyTransp
           callbacks?.onData?.(event.data)
         }
       }),
+      api.onReplay((event) => {
+        // Main fetched this after dropping the pane's hidden output; it replaces the stale screen.
+        if (mode === 'bridge' && attached && event.ptyId === ptyId) {
+          callbacks?.onReplayData?.(event.replay, { clearBeforeReplay: true })
+        }
+      }),
       api.onExit((event) => {
         if (mode === 'bridge' && event.ptyId === ptyId) {
           clearUnreachable()
@@ -186,7 +192,16 @@ export function createLegacyRelayBridgeTransport(ptyId: string, inner: PtyTransp
     getConnectionId: () => (bridged() ? null : inner.getConnectionId?.()),
     ownsRecovery: () => (bridged() ? false : (inner.ownsRecovery?.() ?? false)),
     retryRecovery: () => (bridged() ? false : (inner.retryRecovery?.() ?? false)),
-    setOutputPaused: (paused) => (bridged() ? false : (inner.setOutputPaused?.(paused) ?? false)),
+    setOutputPaused: (paused) => {
+      if (!bridged()) {
+        return inner.setOutputPaused?.(paused) ?? false
+      }
+      if (!api) {
+        return false
+      }
+      api.setOutputPaused({ ptyId, paused })
+      return true
+    },
     connect: (options) => {
       if (options.sessionId === ptyId) {
         return connectBridged(options.callbacks)
@@ -263,6 +278,10 @@ export function createLegacyRelayBridgeTransport(ptyId: string, inner: PtyTransp
       inner.detach?.(options)
     },
     destroy: (options) => {
+      if (bridged()) {
+        // An explicit pane close: stop the shell, as the other transports' destroy does.
+        void api?.close({ ptyId }).catch(() => {})
+      }
       if (bridged() || mode === 'pending') {
         release()
         mode = 'pending'

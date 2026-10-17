@@ -10,6 +10,7 @@
 import { getAutomationRunRepoId } from '../../shared/automation-run-identity'
 import type { Automation } from '../../shared/automations-types'
 import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
+import { isRepoOnCatalogHost } from '../../shared/execution-host'
 import type { OrcadMigrationSourceCutover } from '../../shared/orcad-migration-source-cutover'
 import type { Repo } from '../../shared/repo-types'
 import type { SshManagedServerLinkedProject } from '../../shared/ssh-types'
@@ -27,25 +28,54 @@ import { sshRelayMigrationCutoverPort } from './orcad-migration-ssh-relay-source
 import { orcadCatalogFingerprint } from './orcad-retained-source'
 import type { SshTargetOrcadClaims } from './ssh-target-orcad-claims'
 
-export type OrcadServerRepository = Pick<Repo, 'id' | 'path'>
+export type OrcadServerRepository = Pick<Repo, 'id' | 'path'> & {
+  connectionId?: string | null
+  executionHostId?: string | null
+}
 
-/** Incoming projects the server holds at the same host path under another id. */
+/**
+ * Incoming projects the server holds at the same host path. `sameId` is the server's copy of this
+ * desktop's own row, from an earlier move into the profile a stopped server left (#29560). Only the
+ * server machine's own rows count: one it reaches on another host is a different checkout.
+ */
 export function repositoriesHeldByServer(
   incoming: readonly OrcadServerRepository[],
   server: readonly OrcadServerRepository[]
-): string[] {
+): { otherId: string[]; sameId: string[] } {
   const serverIdsByPath = new Map<string, Set<string>>()
-  for (const repo of server) {
+  for (const repo of server.filter(isRepoOnCatalogHost)) {
     const key = normalizeRuntimePathForComparison(repo.path)
     serverIdsByPath.set(key, (serverIdsByPath.get(key) ?? new Set()).add(repo.id))
   }
-  return incoming
-    .filter((repo) => {
-      const ids = serverIdsByPath.get(normalizeRuntimePathForComparison(repo.path))
-      // The same id is the same row, which the import already accepts as it is.
-      return ids !== undefined && !ids.has(repo.id)
-    })
-    .map((repo) => repo.id)
+  const otherId: string[] = []
+  const sameId: string[] = []
+  for (const repo of incoming) {
+    const ids = serverIdsByPath.get(normalizeRuntimePathForComparison(repo.path))
+    if (ids?.has(repo.id)) {
+      sameId.push(repo.id)
+    } else if (ids) {
+      otherId.push(repo.id)
+    }
+  }
+  return { otherId, sameId }
+}
+
+/**
+ * The server's same-id rows came from an earlier move unless this one already committed (a crash
+ * before the journal caught up), which must resume, not relink. Its live state since then is
+ * newer than this desktop's retained copy, so it is linked rather than re-imported over.
+ */
+async function serverHeldRepositoriesToLink(
+  cutover: OrcadMigrationSourceCutover,
+  destination: OrcadMigrationDestinationCatalog,
+  server: readonly OrcadServerRepository[]
+): Promise<string[]> {
+  const held = repositoriesHeldByServer(cutover.manifest.payload.repositories, server)
+  if (held.sameId.length === 0) {
+    return held.otherId
+  }
+  const state = await destination.readState(cutover.manifest)
+  return state.state === 'committed' ? held.otherId : [...held.otherId, ...held.sameId]
 }
 
 /** The source the cutover was cut from: the real store less any project it linked. */
@@ -160,8 +190,9 @@ export async function linkServerHeldRepositories(args: {
   if (cutover.phase !== 'source-fenced' && cutover.phase !== 'destination-staged') {
     return cutover
   }
-  const linked = repositoriesHeldByServer(
-    cutover.manifest.payload.repositories,
+  const linked = await serverHeldRepositoriesToLink(
+    cutover,
+    args.destination,
     await args.serverRepositories()
   )
   if (linked.length === 0) {

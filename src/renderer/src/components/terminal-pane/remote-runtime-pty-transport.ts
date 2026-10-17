@@ -318,6 +318,10 @@ export function createRemoteRuntimePtyTransport(
   }
 
   const recoveryInputHold = createRemoteRuntimeRecoveryInputHold({ holdBeforeFirstConnect: true })
+  let heldInputRelease: {
+    stream: RemoteRuntimeMultiplexedTerminal
+    waitingForValidation: boolean
+  } | null = null
   const inputJournal = createRemoteRuntimeInputJournal({
     currentStream: sequencedInputTarget,
     // Why: a refusal that never clears would drop every keystroke behind a connected-looking pane.
@@ -385,6 +389,8 @@ export function createRemoteRuntimePtyTransport(
   })
   let lastRecoveryStateKey = ''
   let pendingViewportClaim = false
+  // Why: recovery holds viewport sends, so the intent must survive to the stream that releases typing.
+  let recoveryDeferredViewport: 'claim' | 'resize' | null = null
   let pendingClaimInput: { text: string; queryReply: boolean }[] = []
   let pendingClaimQueryReplyCount = 0
   let terminalCreateRetryWait: {
@@ -1594,6 +1600,7 @@ export function createRemoteRuntimePtyTransport(
       return !discardExpiredDisconnectedInput()
     }
     return (
+      heldInputRelease?.waitingForValidation === true ||
       (recovery.isActive && !subscriptionAcceptsInput()) ||
       (connecting && !connected) ||
       recoveryInputHold.isHolding()
@@ -1609,6 +1616,7 @@ export function createRemoteRuntimePtyTransport(
   }
 
   function discardPendingInput(): void {
+    heldInputRelease = null
     recoveryInputHold.discard()
     inputJournal.discard()
   }
@@ -1724,16 +1732,89 @@ export function createRemoteRuntimePtyTransport(
     ) {
       return
     }
+    if (heldInputRelease?.stream === stream) {
+      return
+    }
+    if (!recoveryInputHold.isHolding()) {
+      resumeSequencedInput(stream, boundHandle)
+      return
+    }
+    const release = { stream, waitingForValidation: inputBatcher.hasPendingValidation() }
+    heldInputRelease = release
+    if (release.waitingForValidation) {
+      const targetLifecycleEpoch = lifecycleEpoch
+      void (async () => {
+        do {
+          await inputBatcher.drain()
+        } while (heldInputRelease === release && inputBatcher.hasPendingValidation())
+        if (heldInputRelease !== release) {
+          return
+        }
+        release.waitingForValidation = false
+        if (
+          lifecycleEpoch === targetLifecycleEpoch &&
+          handle === boundHandle &&
+          getCurrentMultiplexedStream(boundHandle) === stream
+        ) {
+          releaseValidatedHeldInput(stream, boundHandle)
+        } else {
+          heldInputRelease = null
+        }
+      })()
+      return
+    }
+    releaseValidatedHeldInput(stream, boundHandle)
+  }
+
+  function releaseValidatedHeldInput(
+    stream: RemoteRuntimeMultiplexedTerminal,
+    boundHandle: string
+  ): void {
+    const release = heldInputRelease
+    if (
+      destroyed ||
+      terminalEnded ||
+      !connected ||
+      handle !== boundHandle ||
+      inputBlocked() ||
+      !(attachmentReady || subscriptionAcceptsInput())
+    ) {
+      heldInputRelease = null
+      return
+    }
+    // Why: the debounce suffix belongs after the held prefix, never ahead of its replay.
+    const pending = inputBatcher.takePending()
+    if (pending) {
+      recoveryInputHold.enqueue(holdEndpoint(), pending, 'driving')
+    }
     // Why first: journaled bytes were typed before anything in the hold.
     resumeSequencedInput(stream, boundHandle)
-    recoveryInputHold.release(heldInputEndpoint(boundHandle), {
+    const active = recoveryInputHold.release(heldInputEndpoint(boundHandle), {
       isCurrent: () => connected && handle === boundHandle && !inputBlocked(),
-      sendInput: (data) => sendInputNow(data),
+      // Why: the 1 Mi-code-unit hold fits the 16 MiB ceiling; one journal batch survives a mid-send outage.
+      sendInput: (data) => {
+        const current = getCurrentMultiplexedStream(boundHandle)
+        if (!current?.acknowledgesInput()) {
+          return sendInputNow(data)
+        }
+        inputJournal.send(current, heldInputEndpoint(boundHandle), inputSegments(data))
+        return true
+      },
       sendInputImmediate: (data) => sendInputImmediateNow(data),
       sendInputAccepted: sendInputAcceptedToRuntime,
       continuesAfterFailedWrite: () =>
         getCurrentMultiplexedStream(boundHandle)?.acknowledgesInput() === true
     })
+    const settle = (): void => {
+      if (heldInputRelease === release) {
+        heldInputRelease = null
+      }
+    }
+    if (active) {
+      void active.done.then(settle, settle)
+    } else {
+      settle()
+    }
   }
 
   async function sendInputAcceptedToRuntime(
@@ -1833,6 +1914,10 @@ export function createRemoteRuntimePtyTransport(
     }
   }
 
+  // Why: one-shot terminal.send (hosts without input acks) bypasses the journal, so a remount
+  // must learn of its in-flight or refused input here to warn that it may be lost.
+  let fallbackSendsInFlight = 0
+  let fallbackInputRefused = false
   const sendUnacknowledgedInput = (text: string, queryReply = false): boolean => {
     const targetHandle = handle
     const targetLifecycleEpoch = lifecycleEpoch
@@ -1840,6 +1925,12 @@ export function createRemoteRuntimePtyTransport(
       return false
     }
     const stream = getCurrentMultiplexedStream(targetHandle)
+    if (
+      !queryReply &&
+      (heldInputRelease?.waitingForValidation || (!stream && recoveryInputHold.isHolding()))
+    ) {
+      return recoveryInputHold.enqueue(holdEndpoint(), text, 'driving')
+    }
     if (stream?.acknowledgesInput()) {
       // Why true even if unsent: a failed write closes this stream, and the reattach replays the journal.
       inputJournal.send(stream, heldInputEndpoint(targetHandle), [{ text, queryReply }])
@@ -1853,6 +1944,7 @@ export function createRemoteRuntimePtyTransport(
       queuePendingClaimInput(text, queryReply)
       return true
     }
+    fallbackSendsInFlight += 1
     void trackTerminalSend(
       targetHandle,
       callRuntime<{ send: RuntimeTerminalSend }>('terminal.send', {
@@ -1863,6 +1955,7 @@ export function createRemoteRuntimePtyTransport(
       })
     )
       .then((result) => {
+        fallbackInputRefused = result.send.accepted !== true
         if (
           connected &&
           lifecycleEpoch === targetLifecycleEpoch &&
@@ -1877,10 +1970,14 @@ export function createRemoteRuntimePtyTransport(
           return
         }
         if (runtimeTerminalErrorMessage(error).includes('terminal_not_writable')) {
+          fallbackInputRefused = true
           notifyWriteUnavailable()
         } else {
           handleRemoteTerminalError(error)
         }
+      })
+      .finally(() => {
+        fallbackSendsInFlight -= 1
       })
     return true
   }
@@ -1891,9 +1988,40 @@ export function createRemoteRuntimePtyTransport(
     }
   })
 
+  function deferViewportForRecovery(claim: boolean): void {
+    // Why: the replay sends the latest viewport; an older queued batch flushing after it would win.
+    viewportBatcher.clear()
+    recoveryDeferredViewport = claim ? 'claim' : (recoveryDeferredViewport ?? 'resize')
+  }
+
+  // Why before input: typing released at the ack must land at this viewer's grid, not a peer's.
+  function replayRecoveryDeferredViewport(stream: RemoteRuntimeMultiplexedTerminal): void {
+    const deferred = recoveryDeferredViewport
+    recoveryDeferredViewport = null
+    if (!deferred || !desiredViewport) {
+      return
+    }
+    const { cols, rows } = desiredViewport
+    if (deferred === 'claim' && isUnconfirmedClaim(stream, cols, rows)) {
+      return
+    }
+    const sent =
+      deferred === 'resize' ? stream.resize(cols, rows) : stream.claimViewport(cols, rows)
+    if (!sent) {
+      // Why: a failed write starts another recovery, whose stream must still carry this intent.
+      deferViewportForRecovery(deferred === 'claim')
+    } else if (deferred === 'claim') {
+      unconfirmedClaim = { stream, cols, rows, sentAt: Date.now() }
+    }
+  }
+
   function sendViewportUpdate(cols: number, rows: number, claim = false): void {
     const targetHandle = handle
-    if (!connected || !targetHandle || recoveryBlocksIo()) {
+    if (!connected || !targetHandle) {
+      return
+    }
+    if (inputBlocked()) {
+      deferViewportForRecovery(claim)
       return
     }
     const stream = getCurrentMultiplexedStream(targetHandle)
@@ -2437,6 +2565,8 @@ export function createRemoteRuntimePtyTransport(
     let transportClosed = false
     let subscriptionAttached = false
     let subscriptionSnapshotHadContent = false
+    // Why: the ack can arrive before subscribeTerminal resolves; install replays in that order.
+    let installedStream: RemoteRuntimeMultiplexedTerminal | null = null
     // Why: viewport handed to subscribe; a resize during the round-trip falls back to the refresh-only one-shot RPC, replayed through the stream below once current.
     const subscribedViewport = desiredViewport
     const isCurrentSubscription = (): boolean =>
@@ -2520,12 +2650,29 @@ export function createRemoteRuntimePtyTransport(
         onSubscribeAcknowledged: () => {
           if (isCurrentSubscription()) {
             inputReadySubscription = generation
+            if (
+              installedStream &&
+              getCurrentMultiplexedStream(subscribedHandle) === installedStream
+            ) {
+              replayRecoveryDeferredViewport(installedStream)
+              if (!isCurrentSubscription()) {
+                return
+              }
+            }
             releaseHeldInput()
           }
         },
         onSubscribed: () => {
           if (!isCurrentSubscription()) {
             return
+          }
+          if (installedStream) {
+            // Why: hosts without a subscribed ack never reach the ack replay.
+            replayRecoveryDeferredViewport(installedStream)
+            // Why: a failed replay write closes the stream and begins recovery; marking healthy would cancel it.
+            if (!isCurrentSubscription()) {
+              return
+            }
           }
           storedCallbacks.onOutputPauseChanged?.(
             desiredOutputPaused,
@@ -2617,6 +2764,10 @@ export function createRemoteRuntimePtyTransport(
         },
         onWriteUnavailable: () => {
           if (isCurrentSubscription()) {
+            // Without input acks the frame answers refused input, which the journal never held.
+            if (handle && getCurrentMultiplexedStream(handle)?.acknowledgesInput() !== true) {
+              fallbackInputRefused = true
+            }
             notifyWriteUnavailable()
           }
         },
@@ -2682,13 +2833,19 @@ export function createRemoteRuntimePtyTransport(
     closeMultiplexedStream()
     multiplexedStream = nextStream
     multiplexedStreamHandle = subscribedHandle
+    installedStream = nextStream
     setAttachmentReady(subscriptionAttached)
     if (subscriptionAttached) {
       resetRecoveryReplacementPolicy()
       markRecoveryHealthy()
     }
     // Why: a viewport change during the subscribe round-trip hit the no-op one-shot fallback; replay the latest viewport so the PTY isn't stuck at subscribe-time size.
-    if (pendingViewportClaim && desiredViewport) {
+    if (recoveryDeferredViewport) {
+      // Why ack-gated: a host still resolving the PTY ignores viewport frames sent after Subscribe.
+      if (inputReadySubscription === generation || subscriptionAttached) {
+        replayRecoveryDeferredViewport(nextStream)
+      }
+    } else if (pendingViewportClaim && desiredViewport) {
       if (!isUnconfirmedClaim(nextStream, desiredViewport.cols, desiredViewport.rows)) {
         nextStream.claimViewport(desiredViewport.cols, desiredViewport.rows)
         unconfirmedClaim = { stream: nextStream, ...desiredViewport, sentAt: Date.now() }
@@ -3242,12 +3399,23 @@ export function createRemoteRuntimePtyTransport(
       return !destroyed && !terminalEnded && recoveryBlocksIo()
     },
 
+    hasUndeliveredInput() {
+      return (
+        inputJournal.hasUnacknowledgedInput() ||
+        inputBatcher.hasPendingInput() ||
+        recoveryInputHold.hasPendingInput() ||
+        fallbackSendsInFlight > 0 ||
+        fallbackInputRefused
+      )
+    },
+
     claimViewport(cols: number, rows: number): boolean {
       if (!connected || !handle) {
         return false
       }
       rememberViewport(cols, rows)
-      if (recoveryBlocksIo()) {
+      if (inputBlocked()) {
+        deferViewportForRecovery(true)
         return true
       }
       viewportBatcher.clear()
@@ -3275,7 +3443,8 @@ export function createRemoteRuntimePtyTransport(
         return false
       }
       rememberViewport(cols, rows)
-      if (recoveryBlocksIo()) {
+      if (inputBlocked()) {
+        deferViewportForRecovery(meta?.claim === true)
         return true
       }
       if (meta?.claim) {

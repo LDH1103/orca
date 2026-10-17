@@ -128,7 +128,7 @@ function readEmittedVersion(root: string): number {
 }
 
 describe('External process-host development rebuilds', () => {
-  it('skips excluded test and fixture changes without reloading the application', async () => {
+  it('ignores excluded files and rebuilds application edits without recompiling the package', async () => {
     const { root, packageDir, main } = fixture()
     const fixtureDir = join(packageDir, 'src', '__fixtures__')
     mkdirSync(fixtureDir)
@@ -159,6 +159,8 @@ describe('External process-host development rebuilds', () => {
     const rebuilt = nextEvent(watcher, 'END')
     writeFileSync(main, "module.exports = { ...require('@orca/process-host'), changed: true }\n")
     await rebuilt
+    expect(readEmittedVersion(root)).toBe(1)
+    expect(readFileSync(join(root, 'out', 'main.cjs'), 'utf8')).toContain('changed')
     expect(readFileSync(join(packageDir, 'builds.txt'), 'utf8')).toBe('build\n')
   })
 
@@ -220,29 +222,6 @@ describe('External process-host development rebuilds', () => {
     await expect
       .poll(() => readFileSync(output, 'utf8'), { timeout: 15_000 })
       .toContain('exports.version')
-  })
-
-  it('skips package compilation when only application code changes', async () => {
-    const { root, packageDir, main } = fixture()
-    const watcher = watch({
-      input: main,
-      external: ['@orca/process-host'],
-      plugins: [createProcessHostDevRebuildPlugin(root)],
-      output: { file: join(root, 'out', 'main.cjs'), format: 'cjs' }
-    })
-    watchers.push(watcher)
-    closeSuccessfulBundles(watcher)
-    await nextEvent(watcher, 'END')
-    const builds = join(packageDir, 'builds.txt')
-    expect(readFileSync(builds, 'utf8')).toBe('build\n')
-
-    const rebuilt = nextEvent(watcher, 'END')
-    writeFileSync(main, "module.exports = { ...require('@orca/process-host'), changed: true }\n")
-    await rebuilt
-
-    expect(readEmittedVersion(root)).toBe(1)
-    expect(readFileSync(join(root, 'out', 'main.cjs'), 'utf8')).toContain('changed')
-    expect(readFileSync(builds, 'utf8')).toBe('build\n')
   })
 
   it('emits private source edits and new imports before the Electron reload hook', async () => {
@@ -344,7 +323,7 @@ describe('External process-host development rebuilds', () => {
     if (typeof buildStart !== 'function') {
       throw new Error('The process-host rebuild plugin must have a buildStart hook')
     }
-    rebuildPlugin.buildStart = function (...args) {
+    rebuildPlugin.buildStart = async function (...args) {
       const addWatchFile = this.addWatchFile.bind(this)
       const registration = vi.spyOn(this, 'addWatchFile').mockImplementation((file) => {
         addWatchFile(file)
@@ -353,7 +332,7 @@ describe('External process-host development rebuilds', () => {
         }
       })
       try {
-        return buildStart.apply(this, args)
+        return await buildStart.apply(this, args)
       } finally {
         registration.mockRestore()
       }

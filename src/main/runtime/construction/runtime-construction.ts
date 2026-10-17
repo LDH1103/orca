@@ -172,9 +172,6 @@ export abstract class OrcaRuntimeWithStateFields extends OrcaRuntimeWithLinearCo
     })
     installRuntimeSkillCommandSurface(runtime, this.skillCommands)
     Object.assign(this, this.edgeCommands.surface)
-    // Why: keep cache-boundary test seams live while the fetch owner holds the mutable maps.
-    void this.canonicalFetchKeyCache
-    void this.fetchLastCompletedAt
     this.clientSettings = new RuntimeClientSettingsController(store, () =>
       this.notifyReposChanged()
     )

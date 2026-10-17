@@ -192,6 +192,7 @@
     "@xterm/headless": "6.1.0-beta.303",
     "agent-browser": "~0.27.0",
     "electron-updater": "^6.8.10",
+    "fflate": "0.8.3",
     "i18next": "^26.4.2",
     "jsonc-parser": "^3.3.1",
     "node-pty": "^1.1.0",

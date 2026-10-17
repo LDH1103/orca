@@ -30,6 +30,7 @@ import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 import { AUTOMATION_EXTRA_AGENT_ARGS_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
 import { hasExtraAgentArgs } from '../../shared/automation-extra-agent-args'
 import { requiredOrcadMigrationSourceCapability } from '../../shared/orcad-migration-source-kind'
+import type { OrcadServerRepository } from './orcad-migration-repository-link'
 
 type OrcadCatalogMigrationOperation = 'abort' | 'commit' | 'stage' | 'state'
 
@@ -152,15 +153,23 @@ export async function stageRemoteOrcadMigrationBlobChunk(
   return parseOrcadMigrationBlobChunkResult(response.result, request)
 }
 
+// Every orcad's repo.list returns stored rows whole, so a row without host fields is its own.
 const ServerRepositoriesSchema = z.object({
-  repos: z.array(z.object({ id: z.string().min(1), path: z.string().min(1) }))
+  repos: z.array(
+    z.object({
+      id: z.string().min(1),
+      path: z.string().min(1),
+      connectionId: z.string().nullish(),
+      executionHostId: z.string().nullish()
+    })
+  )
 })
 
-/** The projects the destination already holds, as ids and host paths, through the same preflight. */
+/** The projects the destination already holds, with the host each one's files are on. */
 export async function listRemoteOrcadRepositories(
   pairingCode: string,
   options: CatalogRequestOptions = {}
-): Promise<{ id: string; path: string }[]> {
+): Promise<OrcadServerRepository[]> {
   const pairing = parsePairingCode(pairingCode)
   if (!pairing) {
     throw new Error('orcad_migration_pairing_code_invalid')
@@ -169,7 +178,14 @@ export async function listRemoteOrcadRepositories(
   if (!response.ok) {
     throw new Error(`orcad_migration_repositories_failed:${response.error.message}`)
   }
-  return ServerRepositoriesSchema.parse(response.result).repos.map(({ id, path }) => ({ id, path }))
+  return ServerRepositoriesSchema.parse(response.result).repos.map(
+    ({ id, path, connectionId, executionHostId }) => ({
+      id,
+      path,
+      ...(connectionId != null ? { connectionId } : {}),
+      ...(executionHostId != null ? { executionHostId } : {})
+    })
+  )
 }
 
 async function requestCatalogState(

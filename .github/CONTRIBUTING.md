@@ -26,6 +26,17 @@ pnpm install
 pnpm dev
 ```
 
+To reduce main-process rebuild CPU and memory when you do not need its source maps,
+set `ORCA_DEV_MAIN_SOURCEMAPS=0` before `pnpm dev`. In Bash/zsh:
+
+```bash
+ORCA_DEV_MAIN_SOURCEMAPS=0 pnpm dev
+```
+
+In PowerShell, use `$env:ORCA_DEV_MAIN_SOURCEMAPS='0'` before `pnpm dev`.
+Remove the variable when debugging the main process with source maps. Renderer and
+preload settings are unaffected; production builds always keep their hidden main maps.
+
 Ordinary installs include native optional dependencies for the current OS and CPU only.
 Before a cross-architecture build (including `pnpm build:mac`, which produces both x64 and
 arm64 artifacts by default), run `pnpm install:release` to add the other CPU's variants.

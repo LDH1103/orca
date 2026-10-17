@@ -32,6 +32,7 @@ export function applySshManagedServerTransition(
   if (next?.kind === 'relay') {
     catalogLoadByTarget.delete(targetId)
   }
+  remountBridgedTabsOnce(targetId, next)
   if (
     next?.kind === 'relay' &&
     next.reason === 'refused' &&
@@ -49,6 +50,31 @@ export function applySshManagedServerTransition(
       )
     )
   }
+}
+
+// Why not `previous`: a connect reply can write the bridged status into the store before its push.
+const bridgedTargetsRemounted = new Set<string>()
+
+/** COMPAT(legacy-relay-bridge): panes that mounted inert before the connect now reattach. */
+function remountBridgedTabsOnce(targetId: string, next: ManagedServerStatus): void {
+  if (!(next?.kind === 'relay' && next.bridged)) {
+    bridgedTargetsRemounted.delete(targetId)
+    return
+  }
+  if (bridgedTargetsRemounted.has(targetId)) {
+    return
+  }
+  bridgedTargetsRemounted.add(targetId)
+  // Why lazy: the panes module subscribes to the bridge when loaded; importing it here would do so
+  // for every importer of this file.
+  void import('../../components/terminal-pane/legacy-relay-bridge-panes').then(
+    ({ legacyRelayBridgedTabIds }) => {
+      const store = useAppStore.getState()
+      for (const tabId of legacyRelayBridgedTabIds(targetId)) {
+        store.remountTerminalTabForRecovery(tabId)
+      }
+    }
+  )
 }
 
 type CatalogLoad = {
@@ -130,6 +156,27 @@ async function loadManagedServerCatalogs(targetId: string, load: CatalogLoad): P
   }
   useAppStore.setState((state) => withoutConvertedSshHostRows(state, targetId))
   rehomeActiveWorkspace(targetId, environmentId)
+  if (!useAppStore.getState().startupWorktreeRefreshCompleted) {
+    rehomeAfterStartupScan(targetId, environmentId, isCurrent)
+  }
+}
+
+/** Why: on cold start the server's worktree rows arrive with startup's scan, after the attempt above. */
+function rehomeAfterStartupScan(
+  targetId: string,
+  environmentId: string,
+  isCurrent: () => boolean
+): void {
+  const unsubscribe = useAppStore.subscribe((state) => {
+    if (!isCurrent()) {
+      unsubscribe()
+      return
+    }
+    if (state.startupWorktreeRefreshCompleted) {
+      unsubscribe()
+      rehomeActiveWorkspace(targetId, environmentId)
+    }
+  })
 }
 
 /** Why: an active workspace left on the SSH host keeps showing panes that dial the stopped relay. */

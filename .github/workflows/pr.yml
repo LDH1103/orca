@@ -896,6 +896,7 @@ jobs:
     with:
       node_versions: '["24"]'
       runner: blacksmith-4vcpu-ubuntu-2404
+      phase_diagnostics: true
       shards: ${{ needs.preflight.outputs.shards }}
       run_shards: ${{ needs.code_paths.outputs.mobile_ci_tools != 'true' }}
       browser_contract: ${{ needs.code_paths.outputs.orcad_browser == 'true' }}
@@ -1154,6 +1155,8 @@ jobs:
           timeout 300 sudo apt-get install -y cpio rpm
 
       - name: Build package inputs
+        env:
+          ORCA_CI_MAIN_SOURCEMAPS: '0'
         run: |
           status=0
           pnpm run build:cli || status=1
@@ -1298,9 +1301,10 @@ jobs:
       # vitest runs here directly rather than through `pnpm test`, so the addon
       # assertions only hold once install-node-dependencies has rebuilt natives.
       - name: Test Windows installer process probe
-        # Keep cold CIM startup out of the concurrent Electron/native process workload.
+        # Serialize the two suites so their cold PowerShell/CIM starts cannot contend.
         run: >-
           pnpm exec vitest run --config config/vitest.config.ts
+          --no-file-parallelism
           config/scripts/nsis-process-check.test.mjs
           config/scripts/idle-cpu-process-sampling.test.mjs
 
@@ -1420,6 +1424,8 @@ jobs:
       # electron-vite targets overlap instead of running back to back. The Linux package
       # job already packages and smoke-tests an AppImage built that way.
       - name: Build package inputs
+        env:
+          ORCA_CI_MAIN_SOURCEMAPS: '0'
         run: pnpm run build:release:parallel
 
       - name: Prepare Electron native runtime

@@ -3,15 +3,18 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { runProcessSync } from '@orca/process-host'
-import ts from 'typescript-api'
+import type ts from 'typescript-api'
 import type { Plugin } from 'rolldown'
 import { createWorkspaceSourceResolver } from '../scripts/workspace-source-exports.mjs'
 
-function configError(diagnostic: ts.Diagnostic): Error {
-  return new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))
+function configError(diagnostic: ts.Diagnostic, compiler: typeof ts): Error {
+  return new Error(compiler.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))
 }
 
-function processHostInputs(root: string): {
+function processHostInputs(
+  root: string,
+  compiler: typeof ts
+): {
   directory: string
   files: string[]
   directories: ts.MapLike<ts.WatchDirectoryFlags>
@@ -23,14 +26,16 @@ function processHostInputs(root: string): {
   const manifest = resolve(root, source.manifest)
   const directory = dirname(manifest)
   const config = join(directory, 'tsconfig.json')
-  const parsed = ts.getParsedCommandLineOfConfigFile(config, undefined, {
-    ...ts.sys,
+  const parsed = compiler.getParsedCommandLineOfConfigFile(config, undefined, {
+    ...compiler.sys,
     onUnRecoverableConfigFileDiagnostic(diagnostic) {
-      throw configError(diagnostic)
+      throw configError(diagnostic, compiler)
     }
   })
   if (!parsed || parsed.errors.length > 0) {
-    throw parsed?.errors[0] ? configError(parsed.errors[0]) : new Error(`Cannot read ${config}`)
+    throw parsed?.errors[0]
+      ? configError(parsed.errors[0], compiler)
+      : new Error(`Cannot read ${config}`)
   }
   const configSource = parsed.options.configFile
   const inheritedConfigs =
@@ -38,7 +43,7 @@ function processHostInputs(root: string): {
       ? configSource.extendedSourceFiles
       : []
   // Follow explicit imports through exclusions without loading automatic type libraries.
-  const sources = ts
+  const sources = compiler
     .createProgram(parsed.fileNames, { ...parsed.options, noLib: true, types: [] })
     .getSourceFiles()
     .map((source) => source.fileName)
@@ -65,11 +70,13 @@ export function createProcessHostDevRebuildPlugin(root = process.cwd()): Plugin 
         packageDirty = true
       }
     },
-    buildStart() {
+    async buildStart() {
       if (!this.meta.watchMode) {
         return
       }
-      const inputs = packageDirty || !cachedInputs ? processHostInputs(root) : cachedInputs
+      const { default: compiler } = await import('typescript-api')
+      const inputs =
+        packageDirty || !cachedInputs ? processHostInputs(root, compiler) : cachedInputs
       cachedInputs = inputs
       packageFiles = new Set(inputs.files.map((file) => resolve(file)))
       for (const file of inputs.files) {
@@ -91,16 +98,16 @@ export function createProcessHostDevRebuildPlugin(root = process.cwd()): Plugin 
         }
       }
       for (const [directory, flags] of Object.entries(inputs.directories)) {
-        const recursive = flags === ts.WatchDirectoryFlags.Recursive
+        const recursive = flags === compiler.WatchDirectoryFlags.Recursive
         const previous = directoryWatchers.get(directory)
         if (previous?.recursive === recursive) {
           continue
         }
         previous?.watcher.close()
-        if (!ts.sys.watchDirectory) {
+        if (!compiler.sys.watchDirectory) {
           throw new Error('The process-host source directory watcher is unavailable')
         }
-        const watcher = ts.sys.watchDirectory(
+        const watcher = compiler.sys.watchDirectory(
           directory,
           (changedPath) => {
             if (
@@ -110,7 +117,7 @@ export function createProcessHostDevRebuildPlugin(root = process.cwd()): Plugin 
               !packageFiles.has(resolve(changedPath))
             ) {
               try {
-                const next = processHostInputs(root)
+                const next = processHostInputs(root, compiler)
                 const files = new Set(next.files.map((file) => resolve(file)))
                 if (
                   files.size === packageFiles.size &&
@@ -128,7 +135,7 @@ export function createProcessHostDevRebuildPlugin(root = process.cwd()): Plugin 
             }
           },
           recursive,
-          { watchDirectory: ts.WatchDirectoryKind.UseFsEvents }
+          { watchDirectory: compiler.WatchDirectoryKind.UseFsEvents }
         )
         directoryWatchers.set(directory, { recursive, watcher })
       }

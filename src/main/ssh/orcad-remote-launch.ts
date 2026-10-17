@@ -210,7 +210,7 @@ export function readOrcadReadinessCommand(
  * and a `kill -0` that failed for a reason other than "no such process" — a permission
  * error means someone else's process holds that PID, which is evidence of neither. A slot with
  * neither a PID file nor a readiness file (which a launch creates first) answers
- * `NEVER_LAUNCHED`, which only GC reads apart from `UNKNOWN`.
+ * `NEVER_LAUNCHED`: nothing was ever started from it, so like `DEAD` it is proven exit.
  */
 export function orcadLivenessProbeCommand(
   host: RemoteHostPlatform,
@@ -240,25 +240,32 @@ export function orcadLivenessProbeCommand(
   ].join(' ')
 }
 
-export type OrcadLiveness = 'LIVE' | 'DEAD' | 'UNKNOWN'
+export const ORCAD_NEVER_LAUNCHED = 'NEVER_LAUNCHED'
 
+export type OrcadLiveness = 'LIVE' | 'DEAD' | 'UNKNOWN' | typeof ORCAD_NEVER_LAUNCHED
+
+/** The probe's last line; anything but a known word is `UNKNOWN`, never a guess. */
 export function parseOrcadLiveness(output: string): OrcadLiveness {
   const value = output.trim().split('\n').pop()?.trim()
-  return value === 'LIVE' || value === 'DEAD' ? value : 'UNKNOWN'
+  return value === 'LIVE' || value === 'DEAD' || value === ORCAD_NEVER_LAUNCHED ? value : 'UNKNOWN'
 }
 
-export const ORCAD_NEVER_LAUNCHED = 'NEVER_LAUNCHED'
+/**
+ * Proven exit: a dead PID, or a slot nothing was ever started from. `UNKNOWN` proves nothing,
+ * so a reader that would start, replace or remove must not act on it.
+ */
+export function orcadLivenessProvenExited(liveness: OrcadLiveness): boolean {
+  return liveness === 'DEAD' || liveness === ORCAD_NEVER_LAUNCHED
+}
 
 /** GC's reading of a liveness answer: a slot that never launched holds nothing and is removable. */
 export function orcadLivenessAnswerBlocksGc(output: string): boolean {
-  return output.trim().split('\n').pop()?.trim() === ORCAD_NEVER_LAUNCHED
-    ? false
-    : orcadLivenessBlocksGc(parseOrcadLiveness(output))
+  return orcadLivenessBlocksGc(parseOrcadLiveness(output))
 }
 
 /** True when GC must leave this directory alone. Inconclusive counts as in use. */
 export function orcadLivenessBlocksGc(liveness: OrcadLiveness): boolean {
-  return liveness !== 'DEAD'
+  return !orcadLivenessProvenExited(liveness)
 }
 
 export type OrcadReadinessParse =

@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { expect, test } from './helpers/orca-app'
 import { ensureTerminalVisible, waitForSessionReady } from './helpers/store'
 import {
@@ -21,7 +24,8 @@ test.skip(process.platform !== 'win32', 'Native Windows and WSL PTY coverage')
 for (const runtime of ['native', 'wsl'] as const) {
   for (const acceleration of ['off', 'on'] as const) {
     test(`@headful ${runtime}, ${acceleration}: PTY images and Kitty placeholders render on Windows`, async ({
-      orcaPage
+      orcaPage,
+      testRepoPath
     }, testInfo) => {
       await waitForSessionReady(orcaPage)
       await ensureTerminalVisible(orcaPage)
@@ -70,10 +74,17 @@ for (const runtime of ['native', 'wsl'] as const) {
         .toBe(acceleration === 'on')
       const ptyId = await waitForActivePanePtyId(orcaPage)
       const marker = 'WINDOWS_INLINE_IMAGES_DONE'
-      const payload = Buffer.from(`${inlineImagePayload(true)}${marker}\r\n`).toString('base64')
+      const rawPayload = `${inlineImagePayload(true)}${marker}\r\n`
+      const payload = Buffer.from(rawPayload).toString('base64')
+      // Why a file: this command is typed at PTY bind, before WSL bash reaches readline; a
+      // ~25 KB line in the kernel's cooked mode loses everything past 4095 bytes.
+      const payloadFile = `.orca-inline-images-${randomUUID()}.bin`
+      if (runtime === 'wsl') {
+        writeFileSync(path.join(testRepoPath, payloadFile), rawPayload)
+      }
       const command =
         runtime === 'wsl'
-          ? `printf '%s' '${payload}' | base64 -d; printf 'WSL_IMAGE_PROTOCOL=%s\\n' "$ORCA_IMAGE_PROTOCOL"`
+          ? `cat ${payloadFile}; rm -f ${payloadFile}; printf 'WSL_IMAGE_PROTOCOL=%s\\n' "$ORCA_IMAGE_PROTOCOL"`
           : nodeTerminalCommand(['-e', `process.stdout.write(Buffer.from('${payload}', 'base64'))`])
       await execInTerminal(orcaPage, ptyId, command)
       await waitForTerminalOutput(orcaPage, marker, 30_000)

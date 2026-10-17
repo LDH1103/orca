@@ -3,6 +3,8 @@ import type { PrivateKeyFile } from './ssh-auth-resolution'
 import { observeAgentSigning } from './ssh-agent-sign-observer'
 
 const passphraseKeyPaths = new WeakMap<ConnectConfig, string>()
+const deferredKeyboardInteractive = new WeakSet<ConnectConfig>()
+const offeredKeyboardInteractive = new WeakSet<ConnectConfig>()
 
 // Bounds an `AuthenticationMethods a,b,c` ladder so a host that keeps replying
 // "partial success" cannot keep the client prompting forever.
@@ -99,10 +101,24 @@ export function configurePrivateKeyAuthentication(
       authsLeft.includes('publickey') &&
       options.deferKeyboardInteractive?.()
     ) {
+      deferredKeyboardInteractive.add(config)
       attempt = queue.shift()
+    }
+    if (attempt === 'keyboard-interactive') {
+      offeredKeyboardInteractive.add(config)
     }
     next((attempt ?? false) as Parameters<NextAuthHandler>[0])
   }
+}
+
+/** True once this config's handler held the host's first-factor challenge back for a deferred key. */
+export function didDeferKeyboardInteractive(config: ConnectConfig): boolean {
+  return deferredKeyboardInteractive.has(config)
+}
+
+/** True once this config's handler sent keyboard-interactive to the host. */
+export function didOfferKeyboardInteractive(config: ConnectConfig): boolean {
+  return offeredKeyboardInteractive.has(config)
 }
 
 export function getPassphrasePrivateKeyPath(config: ConnectConfig): string | undefined {

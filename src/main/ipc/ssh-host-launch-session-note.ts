@@ -36,16 +36,18 @@ export async function noteEndedLaunchSshSession(
     }
     return
   }
-  checked.set(connection, { generation, ended: false, at: now() })
+  const pending = { generation, ended: false, at: now() }
+  checked.set(connection, pending)
   try {
     const session = await readManagedOrcadLaunchSshSession(
       getAppEnvironment().getPath('userData'),
       environmentId
     )
-    // Why: a disconnect, reconnect or unlink during the probe makes its answer someone else's.
+    // Why: a disconnect, reconnect, unlink or relaunch during the probe makes its answer stale.
     if (
       connectionManager?.getConnection(targetId) !== connection ||
-      connection.getConnectGeneration() !== generation
+      connection.getConnectGeneration() !== generation ||
+      checked.get(connection) !== pending
     ) {
       return
     }
@@ -85,7 +87,7 @@ function flag(targetId: string, environmentId: string): void {
   }
 }
 
-/** After a verified restart: the cached ended verdict no longer describes the host. */
+/** After a verified restart or this client's relaunch: the cached verdict no longer describes the host. */
 export function forgetLaunchSessionVerdict(targetId: string): void {
   const connection = connectionManager?.getConnection(targetId)
   if (connection) {

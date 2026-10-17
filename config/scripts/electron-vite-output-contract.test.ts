@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { EventEmitter } from 'node:events'
 import { runInNewContext } from 'node:vm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MainConfigFactory } from 'electron-vite'
 import { resolveConfig } from 'vite'
 import {
@@ -19,7 +19,7 @@ import {
   createBootstrapFatalExitBanner
 } from '../build-plugins/bootstrap-fatal-exit-banner'
 import { createRequire } from 'node:module'
-import { electronViteConfig } from '../../electron.vite.config'
+import configureElectronVite, { electronViteConfig } from '../../electron.vite.config'
 import { BOOTSTRAP_FATAL_EXIT_GUARD_KEY } from '../../src/main/startup/bootstrap-fatal-exit-guard'
 import { FOREIGN_SQLITE_READER_ENTRY_FILENAME } from '../../src/main/foreign-sqlite-readers/foreign-sqlite-reader-entry-path'
 import { ORCAD_CHILD_ENTRY_POINTS } from './orcad-entry-build.mjs'
@@ -79,6 +79,58 @@ const electronBuilderConfig = require('../electron-builder.config.cjs')
 const { FileMatcher } = require('app-builder-lib/out/fileMatcher')
 
 describe('Electron Vite output contract', () => {
+  it('skips main maps only for explicit check builds and always keeps official release maps', async () => {
+    try {
+      for (const [setting, identity, expected] of [
+        [undefined, undefined, 'hidden'],
+        ['false', undefined, 'hidden'],
+        ['1', undefined, 'hidden'],
+        ['0', undefined, false],
+        ['0', 'stable', 'hidden'],
+        ['0', 'rc', 'hidden']
+      ] as const) {
+        vi.stubEnv('ORCA_CI_MAIN_SOURCEMAPS', setting)
+        vi.stubEnv('ORCA_BUILD_IDENTITY', identity)
+        vi.resetModules()
+        const { electronViteConfig: configured } = await import('../../electron.vite.config')
+        expect(configured.main?.build?.sourcemap).toBe(expected)
+        expect(configured.main?.build?.minify).toBe(electronViteConfig.main?.build?.minify)
+        expect(configured.main?.build?.rollupOptions?.input).toEqual(
+          electronViteConfig.main?.build?.rollupOptions?.input
+        )
+        expect(configured.renderer?.build).toEqual(electronViteConfig.renderer?.build)
+        expect(configured.preload?.build).toEqual(electronViteConfig.preload?.build)
+      }
+    } finally {
+      vi.unstubAllEnvs()
+      vi.resetModules()
+    }
+  })
+
+  it('can skip main source maps during development without changing build output settings', () => {
+    try {
+      vi.stubEnv('ORCA_DEV_MAIN_SOURCEMAPS', undefined)
+      const defaults = configureElectronVite({ command: 'serve', mode: 'development' })
+      expect(defaults.main?.build?.sourcemap).toBe('hidden')
+      expect(defaults.main?.build?.minify).toBe(false)
+      vi.stubEnv('ORCA_DEV_MAIN_SOURCEMAPS', '0')
+      const development = configureElectronVite({ command: 'serve', mode: 'development' })
+      expect(development.main?.build?.sourcemap).toBe(false)
+      expect(development.main?.build?.minify).toBe(false)
+      expect(development.main?.build?.rollupOptions).toBe(
+        electronViteConfig.main?.build?.rollupOptions
+      )
+      expect(development.renderer).toBe(electronViteConfig.renderer)
+      expect(development.preload).toBe(electronViteConfig.preload)
+      for (const mode of ['development', 'production']) {
+        expect(configureElectronVite({ command: 'build', mode })).toBe(electronViteConfig)
+      }
+      expect(electronViteConfig.main?.build?.sourcemap).toBe('hidden')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it("minifies main and renderer with rolldown's in-process minifier", () => {
     // Why: 'esbuild' routes every chunk through a second, undeclared transpiler.
     expect(electronViteConfig.main?.build?.minify).toBe('oxc')
