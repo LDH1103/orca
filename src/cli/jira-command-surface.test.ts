@@ -13,6 +13,7 @@ describe('Jira command surface', () => {
       'jira project list',
       'jira project types',
       'jira project fields',
+      'jira field list',
       'jira comment list',
       'jira comment add',
       'jira status list',
