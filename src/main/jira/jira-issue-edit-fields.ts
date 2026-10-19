@@ -39,7 +39,8 @@ function isListedEditField(fieldKey: string, meta: unknown): boolean {
 export async function getIssueEditFields(
   key: string,
   siteId?: string | null,
-  strict = false
+  strict = false,
+  includeRaw = false
 ): Promise<JiraEditField[]> {
   const entries = getClients(siteId)
   requireStrictJiraSite(entries, siteId, strict)
@@ -79,7 +80,7 @@ export async function getIssueEditFields(
   // Why: rich-text round-trip checks parse Markdown; keep them off the request pool.
   const fields = await Promise.all(
     metaEntries.map(([fieldKey, meta]) =>
-      mapEditField(entry.site, fieldKey, meta, values[fieldKey])
+      mapEditField(entry.site, fieldKey, meta, values[fieldKey], includeRaw)
     )
   )
   return fields.filter((field): field is JiraEditField => field !== null)

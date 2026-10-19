@@ -52,6 +52,10 @@ export const IssueKey = z.object({
   mediaFormat: z.literal('reference').optional()
 })
 
+export const IssueEditFields = IssueKey.extend({
+  includeRaw: z.boolean().optional()
+})
+
 export const AttachmentImage = z.object({
   reference: z.string().uuid(),
   transferId: z.string().uuid()

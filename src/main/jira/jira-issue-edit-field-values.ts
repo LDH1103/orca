@@ -94,7 +94,8 @@ export async function mapEditField(
   site: JiraSite,
   fieldKey: string,
   meta: JiraRecord,
-  raw: unknown
+  raw: unknown,
+  includeRaw = false
 ): Promise<JiraEditField | null> {
   const field = mapCreateField(meta, fieldKey)
   if (!field) {
@@ -122,6 +123,7 @@ export async function mapEditField(
     operations,
     value: richText ? richTextValue(raw) : mapEditFieldValue(field, raw),
     ...(richText ? { richText: true } : {}),
-    writable
+    writable,
+    ...(includeRaw ? { rawValue: raw ?? null } : {})
   }
 }

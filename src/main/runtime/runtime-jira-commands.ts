@@ -205,9 +205,10 @@ export class RuntimeJiraCommands {
   jiraGetIssueEditFields(
     key: string,
     siteId?: string,
-    strict = false
+    strict = false,
+    includeRaw = false
   ): ReturnType<typeof getIssueEditFields> {
-    return getIssueEditFields(key, siteId, strict)
+    return getIssueEditFields(key, siteId, strict, includeRaw)
   }
 
   jiraGetProjectStatusOrder(

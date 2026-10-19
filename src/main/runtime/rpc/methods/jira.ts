@@ -12,6 +12,7 @@ import {
   Connect,
   CreateIssue,
   IssueComment,
+  IssueEditFields,
   IssueKey,
   IssueUpdate,
   ListIssues,
@@ -278,9 +279,14 @@ export const JIRA_METHODS = [
   defineMethod({
     name: 'jira.getIssueEditFields',
     permission: 'workspace',
-    params: IssueKey,
+    params: IssueEditFields,
     handler: async (params, { runtime }) =>
-      runtime.jiraGetIssueEditFields(params.key.trim(), params.siteId, params.strict)
+      runtime.jiraGetIssueEditFields(
+        params.key.trim(),
+        params.siteId,
+        params.strict,
+        params.includeRaw
+      )
   }),
   defineMethod({
     name: 'jira.getProjectStatusOrder',

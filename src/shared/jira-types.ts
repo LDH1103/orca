@@ -174,6 +174,8 @@ export type JiraEditField = JiraCreateField & {
   richText?: boolean
   // False when Jira refuses `set` or the value cannot be written back intact.
   writable: boolean
+  // Jira's own value (ADF on Cloud), null when unset; only on includeRaw reads.
+  rawValue?: unknown
 }
 
 export type JiraIssueFilter = 'assigned' | 'reported' | 'all' | 'done'

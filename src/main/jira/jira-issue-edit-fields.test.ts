@@ -124,6 +124,33 @@ describe('getIssueEditFields', () => {
     expect(fields[0]).toMatchObject({ richText: true })
     // Archived versions/components stay visible as values but are not offered.
     expect(fields[1].allowedValues).toEqual([{ id: '1', name: 'API' }])
+    expect(fields.some((field) => 'rawValue' in field)).toBe(false)
+  })
+
+  it('adds Jira raw values on request, null when the issue has none', async () => {
+    const description = {
+      type: 'doc',
+      version: 1,
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello' }] }]
+    }
+    const sprint = [{ id: 7, name: 'Sprint 7', state: 'active', boardId: 3 }]
+    getClientsMock.mockReturnValue([makeEntry()])
+    jiraRequestMock
+      .mockResolvedValueOnce(editmeta)
+      .mockResolvedValueOnce({ fields: { description, customfield_10010: sprint } })
+    const { getIssueEditFields } = await import('./jira-issue-edit-fields')
+
+    const fields = await getIssueEditFields('ENG-1', 'site-1', true, true)
+
+    expect(fields.map((field) => [field.key, field.rawValue])).toEqual([
+      ['description', description],
+      ['components', null],
+      ['duedate', null],
+      ['customfield_10010', sprint],
+      ['reporter', null]
+    ])
+    // The normalized value stays alongside the raw one.
+    expect(fields[0].value).toEqual({ kind: 'text', text: 'Hello' })
   })
 
   it('marks Cloud rich text with content Markdown cannot keep as not writable', async () => {
@@ -160,6 +187,18 @@ describe('getIssueEditFields', () => {
       writable: true,
       value: { kind: 'text', text: 'h1. Title\n*bold*' }
     })
+  })
+
+  it('keeps Server/DC raw values as wiki text', async () => {
+    getClientsMock.mockReturnValue([makeEntry('server')])
+    jiraRequestMock
+      .mockResolvedValueOnce({ fields: { description: editmeta.fields.description } })
+      .mockResolvedValueOnce({ fields: { description: 'h1. Title' } })
+    const { getIssueEditFields } = await import('./jira-issue-edit-fields')
+
+    const [description] = await getIssueEditFields('ENG-1', 'site-1', true, true)
+
+    expect(description.rawValue).toBe('h1. Title')
   })
 
   it('skips the value read when nothing on the screen is listed', async () => {
