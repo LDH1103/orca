@@ -10,12 +10,12 @@ import { cn } from '@/lib/utils'
 import type { JiraEditField, JiraIssueUpdate } from '../../../shared/jira-types'
 import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import { JiraEditFieldOptionPicker } from './jira-edit-field-option-picker'
+import type { JiraEditFieldEditor } from '../../../shared/jira-edit-field-editor'
 import {
   buildJiraEditFieldUpdate,
   getJiraEditFieldDisplay,
   getJiraEditFieldDraft,
-  getJiraEditFieldEditor,
-  type JiraEditFieldEditor
+  getJiraEditFieldEditor
 } from './jira-issue-edit-field-drafts'
 
 const INPUT_TYPES: Partial<Record<JiraEditFieldEditor, string>> = {

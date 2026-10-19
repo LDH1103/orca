@@ -4,52 +4,17 @@ import type {
   JiraIssueUpdate
 } from '../../../shared/jira-types'
 import {
+  getJiraEditFieldSchemaEditor,
+  type JiraEditFieldEditor
+} from '../../../shared/jira-edit-field-editor'
+import {
   findJiraCreateAllowedValue,
   getJiraCreateAllowedValueLabel,
   getJiraCreateOptionPayload
 } from './task-page-jira-create-fields'
 
-export type JiraEditFieldEditor =
-  | 'text'
-  | 'textarea'
-  | 'number'
-  | 'date'
-  | 'datetime'
-  | 'select'
-  | 'multi-select'
-  | 'user'
-  | 'strings'
-  | 'readonly'
-
-// Reference types Orca can pick from the edit screen's allowedValues.
-const OPTION_SCHEMA_TYPES = new Set(['option', 'version', 'component'])
-const SCALAR_EDITORS: Readonly<Record<string, JiraEditFieldEditor>> = {
-  string: 'text',
-  number: 'number',
-  date: 'date',
-  datetime: 'datetime',
-  user: 'user'
-}
-
 export function getJiraEditFieldEditor(field: JiraEditField): JiraEditFieldEditor {
-  if (!field.writable) {
-    return 'readonly'
-  }
-  if (field.richText) {
-    return 'textarea'
-  }
-  const { type = '', items = '' } = field.schema ?? {}
-  const hasOptions = (field.allowedValues?.length ?? 0) > 0
-  if (type === 'array') {
-    if (items === 'string' && !hasOptions) {
-      return 'strings'
-    }
-    return OPTION_SCHEMA_TYPES.has(items) && hasOptions ? 'multi-select' : 'readonly'
-  }
-  if (OPTION_SCHEMA_TYPES.has(type)) {
-    return hasOptions ? 'select' : 'readonly'
-  }
-  return SCALAR_EDITORS[type] ?? 'readonly'
+  return field.writable ? getJiraEditFieldSchemaEditor(field) : 'readonly'
 }
 
 /** Stable key for an option; matches Select item values and draft entries. */

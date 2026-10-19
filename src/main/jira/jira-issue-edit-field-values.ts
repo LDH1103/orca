@@ -5,6 +5,7 @@ import type {
   JiraSite,
   JiraUser
 } from '../../shared/jira-types'
+import { getJiraEditFieldSchemaEditor } from '../../shared/jira-edit-field-editor'
 import { adfToMarkdownText } from './adf-markdown'
 import { adfRoundTripsThroughMarkdown } from './adf-round-trip'
 import { mapCreateField, mapCreateFieldAllowedValue, mapUser } from './jira-issue-mapping'
@@ -113,7 +114,13 @@ export async function mapEditField(
         .map(mapCreateFieldAllowedValue)
     : undefined
   const richText = isRichTextEditField(field)
-  let writable = operations.includes('set')
+  const value = richText ? richTextValue(raw) : mapEditFieldValue(field, raw)
+  // Writable only when Orca has an editor for the schema and could read the value,
+  // so an empty Sprint or cascading select still reports read-only.
+  let writable =
+    operations.includes('set') &&
+    value.kind !== 'unsupported' &&
+    getJiraEditFieldSchemaEditor({ schema: field.schema, allowedValues, richText }) !== 'readonly'
   if (writable && richText && site.authType !== 'server' && raw && typeof raw === 'object') {
     writable = await adfRoundTripsThroughMarkdown(raw)
   }
@@ -121,7 +128,7 @@ export async function mapEditField(
     ...field,
     allowedValues,
     operations,
-    value: richText ? richTextValue(raw) : mapEditFieldValue(field, raw),
+    value,
     ...(richText ? { richText: true } : {}),
     writable,
     ...(includeRaw ? { rawValue: raw ?? null } : {})

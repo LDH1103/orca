@@ -109,7 +109,8 @@ describe('getIssueEditFields', () => {
       ['description', true, { kind: 'text', text: 'Hello' }],
       ['components', true, { kind: 'options', options: [{ id: '1', name: 'API' }] }],
       ['duedate', true, { kind: 'text', text: '2026-10-20' }],
-      ['customfield_10010', true, { kind: 'unsupported', display: 'Sprint 7' }],
+      // Jira allows `set`, but Orca has no Sprint editor.
+      ['customfield_10010', false, { kind: 'unsupported', display: 'Sprint 7' }],
       [
         'reporter',
         false,
@@ -125,6 +126,44 @@ describe('getIssueEditFields', () => {
     // Archived versions/components stay visible as values but are not offered.
     expect(fields[1].allowedValues).toEqual([{ id: '1', name: 'API' }])
     expect(fields.some((field) => 'rawValue' in field)).toBe(false)
+  })
+
+  it('reports read-only for empty values whose schema Orca cannot edit', async () => {
+    getClientsMock.mockReturnValue([makeEntry()])
+    jiraRequestMock
+      .mockResolvedValueOnce({
+        fields: {
+          customfield_10010: editmeta.fields.customfield_10010,
+          customfield_10030: {
+            name: 'Region',
+            schema: { type: 'option-with-child', custom: 'cascadingselect' },
+            operations: ['set'],
+            allowedValues: [{ id: '1', value: 'EU' }]
+          },
+          customfield_10040: {
+            name: 'Team option',
+            schema: { type: 'option', custom: 'select' },
+            operations: ['set']
+          },
+          customfield_10050: {
+            name: 'Notes',
+            schema: { type: 'string', custom: 'textfield' },
+            operations: ['set']
+          }
+        }
+      })
+      .mockResolvedValueOnce({ fields: {} })
+    const { getIssueEditFields } = await import('./jira-issue-edit-fields')
+
+    const fields = await getIssueEditFields('ENG-1', 'site-1', true)
+
+    // A select with no offered options has nothing to pick from either.
+    expect(fields.map((field) => [field.key, field.value.kind, field.writable])).toEqual([
+      ['customfield_10010', 'empty', false],
+      ['customfield_10030', 'empty', false],
+      ['customfield_10040', 'empty', false],
+      ['customfield_10050', 'empty', true]
+    ])
   })
 
   it('adds Jira raw values on request, null when the issue has none', async () => {
