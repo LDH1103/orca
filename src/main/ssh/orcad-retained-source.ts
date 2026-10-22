@@ -4,19 +4,20 @@
  * only stopping the server, removing the host or uninstalling does.
  *
  * On every start the rows are compared with what the migration committed. If an older build
- * changed them, the host is marked `sourceChangedAt`: its rows show again, it stays on the relay,
- * and it needs a new move. A second manifest is never merged into the server automatically.
+ * changed them, the host is marked `sourceChangedAt`: its rows show again, it is unserved, and it
+ * needs a new move. A second manifest is never merged into the server automatically.
  */
 import { createHash } from 'node:crypto'
 import { getAppEnvironment } from '../../shared/app-environment'
-import { parseExecutionHostId } from '../../shared/execution-host'
+import { getRepoExecutionHostId, parseExecutionHostId } from '../../shared/execution-host'
 import type { FolderWorkspace } from '../../shared/folder-workspace-types'
 import type { ProjectGroup } from '../../shared/project-group-types'
-import type { OrcadMigrationCatalogPayload } from '../../shared/orcad-migration-manifest'
+import type { ProjectHostSetup } from '../../shared/project-types'
+import type { OrcadMigrationCatalogPayload } from '../../shared/orcad-migration/orcad-migration-manifest'
 import {
   isRetainedOrcadMigrationSourceCutover,
   type OrcadMigrationSourceCutover
-} from '../../shared/orcad-migration-source-cutover'
+} from '../../shared/orcad-migration/orcad-migration-source-cutover'
 import type { Repo } from '../../shared/repo-types'
 import { listEnvironments } from '../../shared/runtime-environment-store'
 import { getOrcadSshDeployment } from '../../shared/runtime-environments'
@@ -44,7 +45,7 @@ type TargetStore = Pick<Store, 'getSshTargets' | 'updateSshTarget'>
  * older build since. Mid-migration the rows stay shown, since the source is still authoritative,
  * and so does a fence no journal explains (an empty host's deploy): no move owns those rows.
  */
-export function isHiddenRetainedSourceTarget(
+function isHiddenRetainedSourceTarget(
   userDataPath: string,
   target: Pick<SshTarget, 'id' | 'orcadFence'>
 ): boolean {
@@ -66,7 +67,7 @@ export function isHiddenRetainedSourceTarget(
 }
 
 /** `getUserDataPath` is read only once a host is fenced, so unfenced lists never touch the journal. */
-export function hiddenRetainedSourceTargetIds(
+function hiddenRetainedSourceTargetIds(
   getUserDataPath: () => string,
   targets: readonly SshTarget[]
 ): string[] {
@@ -94,13 +95,19 @@ export function visibleRepos(
   store: CatalogStore & Pick<Store, 'getSshTargets'>,
   getUserDataPath = appUserDataPath
 ): Repo[] {
-  const hidden = hiddenRetainedSourceTargetIds(getUserDataPath, store.getSshTargets())
-  const repos = withoutWslMovedRepos(store.getRepos())
-  if (hidden.length === 0) {
+  return reposShownWith(
+    store.getRepos(),
+    hiddenRetainedSourceTargetIds(getUserDataPath, store.getSshTargets())
+  )
+}
+
+function reposShownWith(allRepos: Repo[], hiddenTargets: readonly string[]): Repo[] {
+  const repos = withoutWslMovedRepos(allRepos)
+  if (hiddenTargets.length === 0) {
     return repos
   }
   return repos.filter(
-    (repo) => !hidden.some((targetId) => repoBelongsToOrcadSource(repo, targetId))
+    (repo) => !hiddenTargets.some((targetId) => repoBelongsToOrcadSource(repo, targetId))
   )
 }
 
@@ -140,6 +147,41 @@ export function visibleFolderWorkspaces(
 }
 
 /**
+ * A setup is listed only while its repo row is: the server that took a hidden row lists its own
+ * setup under the same id, so leaking ours shows every moved project's host twice (#30859).
+ */
+export function visibleProjectHostSetups(
+  store: CatalogStore & Pick<Store, 'getProjectHostSetups' | 'getSshTargets'>,
+  getUserDataPath = appUserDataPath
+): ProjectHostSetup[] {
+  const setups = store.getProjectHostSetups()
+  if (setups.length === 0) {
+    return setups
+  }
+  const hiddenTargets = hiddenRetainedSourceTargetIds(getUserDataPath, store.getSshTargets())
+  const allRepos = store.getRepos()
+  const shownRepos = reposShownWith(allRepos, hiddenTargets)
+  if (hiddenTargets.length === 0 && shownRepos.length === allRepos.length) {
+    return setups
+  }
+  const rowKey = (hostId: string, repoId: string): string => `${hostId}\0${repoId}`
+  const shownKeys = new Set(shownRepos.map((repo) => rowKey(getRepoExecutionHostId(repo), repo.id)))
+  const hiddenKeys = new Set(
+    allRepos
+      .map((repo) => rowKey(getRepoExecutionHostId(repo), repo.id))
+      .filter((key) => !shownKeys.has(key))
+  )
+  return setups.filter((setup) => {
+    if (setup.repoId && hiddenKeys.has(rowKey(setup.hostId, setup.repoId))) {
+      return false
+    }
+    // Repo-less placeholders have no row to follow, so the hidden host decides for them.
+    const host = parseExecutionHostId(setup.hostId)
+    return !(host?.kind === 'ssh' && hiddenTargets.includes(host.targetId))
+  })
+}
+
+/**
  * Identity only, hashed to fit the journal: an older build adding, removing or moving a project is
  * a change, a touched timestamp is not.
  */
@@ -163,7 +205,7 @@ export function currentOrcadSourceFingerprint(
 }
 
 /** What the retained source must still look like for this build to keep serving it from orcad. */
-export function retainedOrcadSourceBaseline(head: OrcadMigrationSourceCutover): string {
+function retainedOrcadSourceBaseline(head: OrcadMigrationSourceCutover): string {
   return head.sourceBaselineFingerprint ?? orcadCatalogFingerprint(head.manifest.payload)
 }
 
