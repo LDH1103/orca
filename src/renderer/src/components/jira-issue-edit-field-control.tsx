@@ -7,10 +7,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { JiraUserPicker } from '@/components/jira-user-picker'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
-import type { JiraEditField, JiraIssueUpdate } from '../../../shared/jira-types'
+import type { JiraEditField, JiraIssueUpdate } from '../../../shared/jira/jira-types'
 import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import { JiraEditFieldOptionPicker } from './jira-edit-field-option-picker'
-import type { JiraEditFieldEditor } from '../../../shared/jira-edit-field-editor'
+import type { JiraEditFieldEditor } from '../../../shared/jira/jira-edit-field-editor'
 import {
   buildJiraEditFieldUpdate,
   getJiraEditFieldDisplay,

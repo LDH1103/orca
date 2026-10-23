@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
-import type { JiraEditField } from '../../../shared/jira-types'
+import type { JiraEditField } from '../../../shared/jira/jira-types'
 
 export function JiraIssueDescriptionAction({
   field,

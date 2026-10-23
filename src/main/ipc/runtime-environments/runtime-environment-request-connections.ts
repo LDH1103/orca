@@ -9,7 +9,7 @@ import type {
   RuntimeOrchestrationEnvelope,
   RuntimeRpcResponse
 } from '../../../shared/runtime-rpc-envelope'
-import { RemoteRuntimeRequestConnection } from '../../../shared/remote-runtime-request-connection'
+import { RemoteRuntimeRequestConnection } from '../../../shared/remote-runtime/requests/remote-runtime-request-connection'
 import { RemoteRuntimeSharedControlConnection } from '../../../shared/remote-runtime-shared-control-connection'
 import { probeAllRemoteRuntimeSocketsNow } from '../../../shared/remote-runtime-socket-liveness'
 import type {
@@ -313,7 +313,7 @@ function getSharedControlConnection(
     sharedControlConnections.set(environmentId, cached)
     const entry = cached
     // Why ready is enough: a socket reaches ready only on its own server frame, which stamps it.
-    setSharedControlAnswerSource(environmentId, () =>
+    setSharedControlAnswerSource(environmentId, entry.connection, () =>
       entry.connection.getDiagnostics().state === 'ready' ? entry.answeredAt() : null
     )
   }

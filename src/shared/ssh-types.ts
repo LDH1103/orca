@@ -14,7 +14,6 @@ export const LEGACY_DEFAULT_SSH_RELAY_GRACE_PERIOD_SECONDS = 3 * 60 * 60
  */
 export const SSH_REMOTE_RUNTIMES = ['legacy', 'pinned-node'] as const
 export type SshRemoteRuntime = (typeof SSH_REMOTE_RUNTIMES)[number]
-export const DEFAULT_SSH_REMOTE_RUNTIME: SshRemoteRuntime = 'pinned-node'
 
 /** Where the design D6 fallback ladder landed; `legacy` is the opt-in host-npm path outside it. */
 export const SSH_REMOTE_RUNTIME_RUNGS = ['A', 'B', 'C', 'D', 'legacy'] as const
@@ -90,7 +89,7 @@ export type SshTarget = {
   /** Reuse a system OpenSSH connection across setup commands. Undefined means
    *  enabled; false is an explicit per-target compatibility opt-out. */
   systemSshConnectionReuse?: boolean
-  /** Relay runtime for this host; undefined means DEFAULT_SSH_REMOTE_RUNTIME. */
+  /** Relay runtime for this host; undefined means pinned-node. */
   remoteRuntime?: SshRemoteRuntime
   /** Main-owned ladder cache; renderer updates never set it. */
   remoteRuntimeResolution?: SshRemoteRuntimeResolution
@@ -117,7 +116,7 @@ export type SshTarget = {
   managedServerUpdateFailure?: { reason: string; appVersion: string }
   orcadFence?: {
     environmentId: string
-    /** An older build changed the retained source rows: the host stays on the relay until moved again. */
+    /** The retained source holds projects no move took: the host is unserved until moved again. */
     sourceChangedAt?: string
   }
 }

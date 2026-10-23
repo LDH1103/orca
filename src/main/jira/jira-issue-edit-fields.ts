@@ -1,4 +1,4 @@
-import type { JiraEditField } from '../../shared/jira-types'
+import type { JiraEditField } from '../../shared/jira/jira-types'
 import { apiBasePath, jiraRequest } from './authenticated-request'
 import { clearToken, getClients, isAuthError } from './client'
 import { mapEditField } from './jira-issue-edit-field-values'

@@ -1,4 +1,4 @@
-import { JIRA_IMAGE_CAPABILITY } from '../../../shared/jira-attachment-image'
+import { JIRA_IMAGE_CAPABILITY } from '../../../shared/jira/jira-attachment-image'
 import { migrateLegacyJiraImages } from './runtime-jira-image-cache'
 import type {
   JiraComment,
@@ -8,7 +8,7 @@ import type {
   JiraMutationResult,
   JiraPriority,
   JiraTransition
-} from '../../../shared/jira-types'
+} from '../../../shared/jira/jira-types'
 import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import {
   assertRuntimeEnvironmentCapability,
@@ -18,7 +18,7 @@ import {
 import {
   JIRA_ISSUE_EDIT_FIELDS_RUNTIME_CAPABILITY,
   JIRA_TRANSITION_FIELDS_RUNTIME_CAPABILITY
-} from '../../../shared/protocol-version'
+} from '../../../shared/jira/jira-detail-capabilities'
 import { RuntimeRpcCallError } from './runtime-rpc-result'
 import { readRuntimeJiraPayload } from './runtime-jira-payload-stream'
 

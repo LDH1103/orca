@@ -4,26 +4,19 @@ import type {
   JiraIssueUpdate,
   JiraMutationResult,
   JiraSite
-} from '../../shared/jira-types'
+} from '../../shared/jira/jira-types'
 import { acquire, release } from './request-queue'
 import { apiBasePath, jiraRequest } from './authenticated-request'
 import { clearToken, getClients, isAuthError } from './client'
 import { issueUrl, toBodyText } from './jira-issue-mapping'
 import type { JiraRecord } from './jira-record-pages'
 
-/**
- * Wraps a user id in the reference object the site expects: `{accountId}` on
- * Cloud, `{name}` on Server/DC, which identifies users by username and whose
- * ids `mapUser` stores in the accountId slot.
- */
+/** Cloud uses accountId; Server/DC uses username, stored in mapUser's accountId slot. */
 export function userFieldRef(site: JiraSite, id: string | null): JiraRecord {
   return site.authType === 'server' ? { name: id } : { accountId: id }
 }
 
-/**
- * Shapes a user-typed create value (scalar or array) into Jira's user reference
- * objects. Jira rejects a bare string here and reports the field as missing.
- */
+/** User-picker fields require reference objects, including within arrays; Jira treats bare strings as missing. */
 function toUserFieldValue(site: JiraSite, value: unknown): unknown {
   if (typeof value === 'string') {
     return userFieldRef(site, value)
@@ -54,7 +47,7 @@ async function shapeEditFields(site: JiraSite, updates: JiraIssueUpdate): Promis
   return shaped
 }
 
-/** Creates an issue, shaping the customFields keys named by `userFieldKeys`. */
+/** Shape customFields named by userFieldKeys into user references. */
 export async function createIssue(args: JiraCreateIssueArgs): Promise<JiraCreateIssueResult> {
   const entry = getClients(args.siteId)[0]
   if (!entry) {
@@ -102,7 +95,6 @@ export async function createIssue(args: JiraCreateIssueArgs): Promise<JiraCreate
   }
 }
 
-/** Applies field, assignee, and transition updates to an existing issue. */
 export async function updateIssue(
   key: string,
   updates: JiraIssueUpdate,

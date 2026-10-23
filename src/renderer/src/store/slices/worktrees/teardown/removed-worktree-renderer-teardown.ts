@@ -16,6 +16,7 @@ import {
   flushPurgedWorkspaceEdits,
   type ConfirmedUnsavedDiscards
 } from './removed-workspace-unsaved-files'
+import { forgetDesktopCreatedServerTabsOf } from '@/lib/desktop-created-server-tabs'
 import type { WorktreeStateBeforeRemoval } from './worktree-state-before-removal'
 
 /**
@@ -53,6 +54,7 @@ export async function tearDownRemovedWorktreeRendererState(args: {
   // Why the captured keys: closing a structured chat keeps its conversation's draft, and a listing
   // refresh may already have dropped these tabs.
   deleteWorkspaceChatDrafts(beforeRemoval.chatDraftKeys)
+  forgetDesktopCreatedServerTabsOf(worktreeId)
   for (const tab of get().unifiedTabsByWorktree[worktreeId] ?? []) {
     if (tab.contentType === 'agent-session') {
       get().closeUnifiedTab(tab.id, {
@@ -67,6 +69,8 @@ export async function tearDownRemovedWorktreeRendererState(args: {
   await Promise.resolve(
     get().shutdownWorktreeBrowsers(worktreeId, { preserveWorktreeSelection: true })
   )
+  // Why here too: an SSH or paired workspace's pages use this desktop's profile, which that host's removal never reaches.
+  void get().deleteManagedBrowserSessionProfile({ kind: 'worktree', id: worktreeId })
   await get().shutdownWorktreeTerminals(worktreeId, {
     shutdownReason: 'remove-worktree',
     // The backend removal above already killed the workspace's PTYs.

@@ -180,7 +180,7 @@ describe('host-owned hook presence', () => {
       },
       'ssh-1'
     )
-    // The relay has no identity resolution, so it can hand the nested Claude ownership.
+    // Relays cannot resolve process identity and may initially attribute the pane to nested Claude.
     server.ingestRemote(
       {
         ...base,
@@ -366,14 +366,15 @@ describe('host-owned hook presence', () => {
     expect(probe).not.toHaveBeenCalled()
     expect(visible(server)).toBe(true)
     await hook(server, 'SessionStart', 'relaunch', undefined, 4002)
-    await vi.waitFor(() => expect(probe).toHaveBeenCalledOnce())
-    await vi.waitFor(() => expect(visible(server)).toBe(false))
+    expect(probe).toHaveBeenCalledOnce()
+    expect(
+      server.getStatusSnapshot().find((row) => row.paneKey === PANE)?.providerSession?.id
+    ).toBe('relaunch')
     await hook(server, 'UserPromptSubmit', 'relaunch', undefined, 4002)
     expect(state(server)).toBe('working')
   })
 })
 
-// #24353: a remote worker's liveness reads the exit after the hook store has reconciled the row.
 describe('retained agent exit', () => {
   it('keeps a SessionEnd exit readable after the row is reconciled', async () => {
     const server = await createServer()
@@ -505,9 +506,11 @@ describe('retained agent exit', () => {
           finish = resolve
         })
     )
-    await hook(server, 'SessionStart', 'replacement', undefined, 4002)
+    const replacement = hook(server, 'SessionStart', 'replacement', undefined, 4002)
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledOnce())
     const overlapping = server.checkAgentPresenceSince(PANE, attachedAt)
     finish('exited')
+    await replacement
     expect(await overlapping).not.toBe('exited')
   })
 
@@ -554,7 +557,7 @@ describe('retained agent exit', () => {
     servers.push(first)
     await first.start({ env: 'production', userDataPath })
     const attachedAt = Date.now() - 1
-    // Spool stamps are whole seconds, so only one a full second before the exit predates it.
+    // Spool timestamps have whole-second precision.
     const spooledAt = Date.now() - 5_000
     await hook(first, 'SessionStart')
     await hook(first, 'SessionEnd', 'session-a', 'prompt_input_exit')
@@ -568,7 +571,6 @@ describe('retained agent exit', () => {
         paneKey: PANE,
         source: 'claude',
         receivedAt: spooledAt,
-        // An obsolete owner identity must not be installed over the proven exit.
         agentProcess: JSON.stringify({
           pid: 4009,
           platform: process.platform,
@@ -689,7 +691,7 @@ describe('retained agent exit lifetime', () => {
     expect(await server.checkAgentPresenceSince(moved, 0)).toBeNull()
   })
 
-  // Why: a finished shell command retires launch authority while the PTY, and the exit's meaning, survive.
+  // Launch authority can retire while the PTY and retained exit remain valid.
   it('keeps the exit when only the pane launch authority retires', async () => {
     const server = await serverWithExit()
     server.retirePaneAuthority(PANE)
@@ -713,7 +715,7 @@ describe('retained agent exit lifetime', () => {
         clock.mockRestore()
       }
     }
-    // The retained resume row still names the session, so its exit must stay with it.
+    // A retained resume row keeps its session exit.
     expect(server.getStatusSnapshot().some((row) => row.paneKey === PANE)).toBe(true)
     saveEightDaysLater()
     expect(await server.checkAgentPresenceSince(PANE, 0)).toBe('exited')

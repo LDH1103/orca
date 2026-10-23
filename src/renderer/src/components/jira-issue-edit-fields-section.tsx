@@ -1,7 +1,7 @@
 import { Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
-import type { JiraEditField, JiraIssueUpdate } from '../../../shared/jira-types'
+import type { JiraEditField, JiraIssueUpdate } from '../../../shared/jira/jira-types'
 import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import { JiraIssueEditFieldControl } from './jira-issue-edit-field-control'
 import { getJiraEditFieldDisplay, getJiraEditFieldEditor } from './jira-issue-edit-field-drafts'

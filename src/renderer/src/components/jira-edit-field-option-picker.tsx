@@ -11,7 +11,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
-import type { JiraEditField } from '../../../shared/jira-types'
+import type { JiraEditField } from '../../../shared/jira/jira-types'
 import { getJiraCreateAllowedValueLabel } from './task-page-jira-create-fields'
 import { getJiraEditOptionKey } from './jira-issue-edit-field-drafts'
 

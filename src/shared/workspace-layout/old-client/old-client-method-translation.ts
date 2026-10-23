@@ -195,12 +195,12 @@ export function translateSessionTabMove(
   }
   const shownOrder = toTabIds(workspace, shown.tabOrder)
   if (params.kind === 'move-to-group') {
-    const shownIndex = Math.max(0, Math.min(params.index ?? shownOrder.length, shownOrder.length))
-    // A shown index lands before the same tab in the full order; the end stays the end.
-    const index =
-      shownIndex === shownOrder.length
-        ? target.tabOrder.length
-        : target.tabOrder.indexOf(shownOrder[shownIndex]!)
+    const rowCount = shown.tabOrder.length
+    const shownIndex = Math.max(0, Math.min(params.index ?? rowCount, rowCount))
+    // A shown index lands before the first tab main holds from that row on (a row it holds no tab
+    // for, such as one the window drew before main's frame, places nothing); past the last, the end.
+    const before = toTabIds(workspace, shown.tabOrder.slice(shownIndex))[0]
+    const index = before === undefined ? target.tabOrder.length : target.tabOrder.indexOf(before)
     return to({
       ...on,
       type: 'moveTab',
@@ -209,11 +209,23 @@ export function translateSessionTabMove(
       afterTabId: tabOrderAnchor(target.tabOrder, index)
     })
   }
-  const sent = params.tabOrder.map((rowId) => resolveSessionTabRow(workspace, rowId)?.tab.id)
+  // A row main holds no tab for (one drawn before main's frame) is named once, and keeps no place.
+  const unheld = (rowIds: readonly string[]) =>
+    rowIds.filter((rowId) => !resolveSessionTabRow(workspace, rowId))
+  const shownUnheld = new Set(unheld(shown.tabOrder))
+  const sentUnheld = unheld(params.tabOrder)
+  if (
+    sentUnheld.length !== shownUnheld.size ||
+    new Set(sentUnheld).size !== sentUnheld.length ||
+    sentUnheld.some((rowId) => !shownUnheld.has(rowId))
+  ) {
+    return refused('invalid_tab_order')
+  }
+  const sent = toTabIds(workspace, params.tabOrder)
   if (
     sent.length !== shownOrder.length ||
     new Set(sent).size !== sent.length ||
-    sent.some((id) => id === undefined || !shownOrder.includes(id)) ||
+    sent.some((id) => !shownOrder.includes(id)) ||
     !sent.includes(tab.id)
   ) {
     return refused('invalid_tab_order')

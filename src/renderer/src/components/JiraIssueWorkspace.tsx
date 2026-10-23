@@ -10,7 +10,7 @@ import type {
   JiraIssue,
   JiraIssueUpdate,
   JiraMutationResult
-} from '../../../shared/jira-types'
+} from '../../../shared/jira/jira-types'
 import {
   getTaskSourceCacheScope,
   type TaskSourceContext

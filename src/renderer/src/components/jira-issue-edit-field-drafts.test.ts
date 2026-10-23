@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { JiraEditField } from '../../../shared/jira-types'
+import type { JiraEditField } from '../../../shared/jira/jira-types'
 import {
   buildJiraEditFieldUpdate,
   getJiraEditFieldDisplay,

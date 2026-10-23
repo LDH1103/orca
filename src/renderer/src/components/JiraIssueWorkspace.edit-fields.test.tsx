@@ -8,7 +8,7 @@ import {
 } from './__mocks__/jira-issue-workspace-edit-fixture'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { JiraEditField } from '../../../shared/jira-types'
+import type { JiraEditField } from '../../../shared/jira/jira-types'
 
 const dueDate: JiraEditField = {
   key: 'duedate',

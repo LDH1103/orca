@@ -2,11 +2,11 @@ import type {
   JiraCreateFieldAllowedValue,
   JiraEditField,
   JiraIssueUpdate
-} from '../../../shared/jira-types'
+} from '../../../shared/jira/jira-types'
 import {
   getJiraEditFieldSchemaEditor,
   type JiraEditFieldEditor
-} from '../../../shared/jira-edit-field-editor'
+} from '../../../shared/jira/jira-edit-field-editor'
 import {
   findJiraCreateAllowedValue,
   getJiraCreateAllowedValueLabel,

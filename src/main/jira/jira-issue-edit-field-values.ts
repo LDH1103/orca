@@ -4,8 +4,8 @@ import type {
   JiraEditFieldValue,
   JiraSite,
   JiraUser
-} from '../../shared/jira-types'
-import { getJiraEditFieldSchemaEditor } from '../../shared/jira-edit-field-editor'
+} from '../../shared/jira/jira-types'
+import { getJiraEditFieldSchemaEditor } from '../../shared/jira/jira-edit-field-editor'
 import { adfToMarkdownText } from './adf-markdown'
 import { adfRoundTripsThroughMarkdown } from './adf-round-trip'
 import { mapCreateField, mapCreateFieldAllowedValue, mapUser } from './jira-issue-mapping'
