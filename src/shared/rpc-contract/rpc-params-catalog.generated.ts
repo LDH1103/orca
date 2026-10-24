@@ -179,6 +179,7 @@ import {
 } from './computer-schemas-params'
 import {
   ConnectorAnswer,
+  ConnectorCancel,
   ConnectorPendingPrompt,
   ConnectorSend,
   ConnectorStart,
@@ -902,6 +903,7 @@ export const RPC_PARAMS_BY_METHOD = {
   'computer.setValue': SetValue,
   'computer.typeText': TypeText,
   'connector.answer': ConnectorAnswer,
+  'connector.cancel': ConnectorCancel,
   'connector.pendingPrompt': ConnectorPendingPrompt,
   'connector.send': ConnectorSend,
   'connector.start': ConnectorStart,

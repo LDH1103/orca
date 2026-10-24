@@ -12,7 +12,7 @@ import type {
   JiraUser
 } from '../../shared/jira/jira-types'
 import { JIRA_ISSUE_EDIT_FIELDS_RUNTIME_CAPABILITY } from '../../shared/jira/jira-detail-capabilities'
-import { isResolvedJiraIssueMatch, parseJiraIssueUrl } from '../../shared/jira-issue-url'
+import { isResolvedJiraIssueMatch, parseJiraIssueUrl } from '../../shared/jira/jira-issue-url'
 import type { CommandHandler, HandlerContext } from '../dispatch'
 import {
   getOptionalPositiveIntegerFlag,

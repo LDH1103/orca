@@ -2,7 +2,7 @@ import type {
   RuntimeEditorTabReveal,
   RuntimeFileOpenPosition
 } from '../../shared/runtime-file-contracts'
-import type { JiraQuickFilterState } from '../../shared/jira-quick-filters'
+import type { JiraQuickFilterState } from '../../shared/jira/jira-quick-filters'
 import type {
   JiraSavedFilterState,
   JiraSavedFilterMutation
@@ -143,6 +143,7 @@ export type UiCommandEventApi = {
   }) => void
   onNewTerminalTab: (callback: () => void) => () => void
   onFocusBrowserAddressBar: (callback: (target: BrowserPageCommandTarget) => void) => () => void
+  onShowBrowserHistory: (callback: (target: BrowserPageCommandTarget) => void) => () => void
   onFindInBrowserPage: (source: BrowserFindSource, callback: () => void) => () => void
   onReloadBrowserPage: (callback: (target: BrowserPageCommandTarget) => void) => () => void
   onBrowserHistoryNavigate: (
