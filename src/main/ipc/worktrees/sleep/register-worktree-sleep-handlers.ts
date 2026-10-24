@@ -19,7 +19,10 @@ function isRestoredPane(value: unknown): value is RestoredPane {
 /** The window's Sleep: main runs it on each workspace's hosts and the window follows its notices. */
 export function registerWorktreeSleepHandlers(context: WorktreeIpcContext): void {
   ipcMain.handle('worktrees:sleep', (_event, request: WorkspaceSleepRequest) =>
-    context.runtime.sleepWorkspaces(request)
+    context.runtime.sleepWorkspaces({
+      targets: request.targets,
+      markChatsAsleep: request.markChatsAsleep
+    })
   )
   // The user opened a workspace whose sleep is still running: its VM keeps running.
   ipcMain.handle('worktrees:sleepReopened', (_event, worktreeId: string) =>

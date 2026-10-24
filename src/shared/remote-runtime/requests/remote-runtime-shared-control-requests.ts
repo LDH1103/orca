@@ -8,9 +8,9 @@ import {
 } from './remote-runtime-prepared-request-admission'
 import { remoteRuntimeTimeoutError } from './remote-runtime-request-frames'
 import type { RuntimeOrchestrationEnvelope, RuntimeRpcResponse } from '../../runtime-rpc-envelope'
-import { toRemoteRuntimeClientError } from '../../remote-runtime-shared-control-protocol'
-import { rejectSharedControlPendingRequest } from '../../remote-runtime-shared-control-state'
-import type { SharedControlPendingRequest } from '../../remote-runtime-shared-control-types'
+import { toRemoteRuntimeClientError } from '../control/remote-runtime-shared-control-protocol'
+import { rejectSharedControlPendingRequest } from '../control/remote-runtime-shared-control-state'
+import type { SharedControlPendingRequest } from '../control/remote-runtime-shared-control-types'
 
 const MAX_RETAINED_METHOD_CHARS = 256
 

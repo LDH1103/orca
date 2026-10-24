@@ -142,12 +142,12 @@ it('retains fork reports without requiring a Slack secret and redacts delivery e
     sendNotification({
       fetch: vi.fn().mockRejectedValue(new Error('fetch failed: https://example.test/slack'))
     })
-  ).rejects.toThrow('Slack dependency review notification could not be sent')
+  ).rejects.toThrow(/^Slack dependency review notification could not be sent$/)
   await expect(
     sendNotification({
       fetch: vi.fn().mockResolvedValue({ ok: false, status: 503 })
     })
-  ).rejects.toThrow('Slack dependency review notification returned HTTP 503')
+  ).rejects.toThrow(/^Slack dependency review notification returned HTTP 503$/)
 })
 
 it('extracts release data while excluding executable package and Cargo configuration', async () => {

@@ -3,7 +3,7 @@ import { startSharedControlSubscription } from './remote-runtime-shared-control-
 import { closeSharedControlConnectionSubscription } from './remote-runtime-shared-control-subscription-close'
 import { handleSharedControlLogicalResponse } from './remote-runtime-shared-control-subscriptions'
 import { SharedControlRetiredRequestIds } from './remote-runtime-shared-control-retired-request-ids'
-import type { SharedControlLogicalSubscription } from '../../remote-runtime-shared-control-types'
+import type { SharedControlLogicalSubscription } from '../control/remote-runtime-shared-control-types'
 
 it.each([true, false])(
   'cleans up replayed setup aborted with host id known=%s',

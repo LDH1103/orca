@@ -10,12 +10,12 @@ import type {
   RuntimeRpcResponse
 } from '../../../shared/runtime-rpc-envelope'
 import { RemoteRuntimeRequestConnection } from '../../../shared/remote-runtime/requests/remote-runtime-request-connection'
-import { RemoteRuntimeSharedControlConnection } from '../../../shared/remote-runtime-shared-control-connection'
+import { RemoteRuntimeSharedControlConnection } from '../../../shared/remote-runtime/control/remote-runtime-shared-control-connection'
 import { probeAllRemoteRuntimeSocketsNow } from '../../../shared/remote-runtime-socket-liveness'
 import type {
   RemoteRuntimeSharedConnectionDiagnostics,
   RemoteRuntimeSharedSubscription
-} from '../../../shared/remote-runtime-shared-control-types'
+} from '../../../shared/remote-runtime/control/remote-runtime-shared-control-types'
 import { isRuntimeEnvironmentManuallyDisconnected } from './runtime-environment-manual-disconnect'
 import { publishRuntimeEnvironmentDiagnostics } from './runtime-environment-diagnostics-broadcast'
 import { sharedControlEnvironmentPolicy } from './runtime-environment-shared-control-policy'

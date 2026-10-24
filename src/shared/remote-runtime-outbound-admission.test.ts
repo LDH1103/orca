@@ -22,8 +22,8 @@ import {
 } from './remote-runtime-memory-limits'
 import { getRemoteRuntimeRequestAdmissionEvidence } from './remote-runtime/requests/remote-runtime-prepared-request-admission'
 import { RemoteRuntimeRequestConnection } from './remote-runtime/requests/remote-runtime-request-connection'
-import { RemoteRuntimeSharedControlConnection } from './remote-runtime-shared-control-connection'
-import { waitForSharedControlReadyWithTimeout } from './remote-runtime-shared-control-ready'
+import { RemoteRuntimeSharedControlConnection } from './remote-runtime/control/remote-runtime-shared-control-connection'
+import { waitForSharedControlReadyWithTimeout } from './remote-runtime/control/remote-runtime-shared-control-ready'
 
 type InspectableRequestConnection = {
   close: () => void

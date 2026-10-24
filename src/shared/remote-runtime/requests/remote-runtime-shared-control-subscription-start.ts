@@ -1,13 +1,13 @@
 import { throwIfSignalAborted } from '../../abort-signal-reason'
 import { randomUUID } from 'node:crypto'
 import { remoteRuntimeUnavailableError } from './remote-runtime-request-frames'
-import { admitSharedControlSubscription } from '../../remote-runtime-shared-control-admission'
+import { admitSharedControlSubscription } from '../control/remote-runtime-shared-control-admission'
 import { createSharedControlSubscription } from './remote-runtime-shared-control-subscriptions'
 import type {
   RemoteRuntimeSharedSubscription,
   SharedControlLogicalSubscription,
   SharedControlSubscriptionCallbacks
-} from '../../remote-runtime-shared-control-types'
+} from '../control/remote-runtime-shared-control-types'
 
 export async function startSharedControlSubscription<TResult>(args: {
   subscriptions: Map<string, SharedControlLogicalSubscription<unknown>>

@@ -5,7 +5,7 @@ import {
   sendRetiredSharedControlCleanupRequest
 } from './remote-runtime-shared-control-subscription-close'
 import { createSharedControlSubscription } from './remote-runtime-shared-control-subscriptions'
-import type { SharedControlLogicalSubscription } from '../../remote-runtime-shared-control-types'
+import type { SharedControlLogicalSubscription } from '../control/remote-runtime-shared-control-types'
 
 describe('shared-control subscription retirement', () => {
   it('retires a closed subscription and its cleanup request', () => {

@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import type { RuntimeRpcResponse } from '../../runtime-rpc-envelope'
-import { getCleanupRequest, getSubscriptionId } from '../../remote-runtime-shared-control-protocol'
+import {
+  getCleanupRequest,
+  getSubscriptionId
+} from '../control/remote-runtime-shared-control-protocol'
 import {
   finishSharedControlSubscription,
   handleSharedControlSubscriptionResponse
-} from '../../remote-runtime-shared-control-state'
+} from '../control/remote-runtime-shared-control-state'
 import type {
   SharedControlLogicalSubscription,
   SharedControlSubscriptionCallbacks
-} from '../../remote-runtime-shared-control-types'
+} from '../control/remote-runtime-shared-control-types'
 
 export function createSharedControlSubscription<TResult>(args: {
   requestId: string

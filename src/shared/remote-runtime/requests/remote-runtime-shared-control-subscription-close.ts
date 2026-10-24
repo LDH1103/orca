@@ -3,7 +3,7 @@ import {
   closeSharedControlLogicalSubscription,
   sendSharedControlCleanupRequest
 } from './remote-runtime-shared-control-subscriptions'
-import type { SharedControlLogicalSubscription } from '../../remote-runtime-shared-control-types'
+import type { SharedControlLogicalSubscription } from '../control/remote-runtime-shared-control-types'
 
 export function closeSharedControlConnectionSubscription(args: {
   subscriptions: Map<string, SharedControlLogicalSubscription<unknown>>
