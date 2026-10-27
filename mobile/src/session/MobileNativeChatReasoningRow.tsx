@@ -14,7 +14,10 @@ import { useMobileNativeChatFullMessage } from './MobileNativeChatFullContent'
 import { MobileMarkdown } from '../components/MobileMarkdown'
 import { colors } from '../theme/mobile-theme'
 import { MobileNativeChatLongPressContent } from './MobileNativeChatLongPressContent'
-import { CHAT_PROSE_SCALE, styles } from './mobile-native-chat-message-styles'
+import {
+  CHAT_PROSE_SCALE,
+  styles
+} from './native-chat/transcript/mobile-native-chat-message-styles'
 
 /** A grouped thought keeps its own source recovery when its original transcript row is hidden. */
 export function MobileNativeChatGroupedThought({

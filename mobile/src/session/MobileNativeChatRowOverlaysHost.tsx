@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
-import { MobileNativeChatImageViewer } from './MobileNativeChatImageViewer'
-import { MobileNativeChatMessageActionsSheet } from './MobileNativeChatMessageActionsSheet'
+import { MobileNativeChatImageViewer } from './native-chat/visual/MobileNativeChatImageViewer'
+import { MobileNativeChatMessageActionsSheet } from './native-chat/transcript/MobileNativeChatMessageActionsSheet'
 import {
   MobileNativeChatRowOverlaysContext,
   type MobileNativeChatViewedImage

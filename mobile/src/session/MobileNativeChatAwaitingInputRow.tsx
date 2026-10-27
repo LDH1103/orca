@@ -6,7 +6,7 @@ import {
 } from '../../../src/shared/native-chat/input/native-chat-ask-row'
 import { INLINE_TEXT_SELECTION } from '../components/inline-text-selection'
 import { colors, spacing, typography } from '../theme/mobile-theme'
-import { scaledType } from './mobile-native-chat-message-styles'
+import { scaledType } from './native-chat/transcript/mobile-native-chat-message-styles'
 
 const ICON_SIZE = 15
 

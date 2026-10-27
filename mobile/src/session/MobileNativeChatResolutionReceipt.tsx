@@ -9,8 +9,8 @@ import {
 import { INLINE_TEXT_SELECTION } from '../components/inline-text-selection'
 import { colors, spacing, typography } from '../theme/mobile-theme'
 import { MobileNativeChatAwaitingInputRow } from './MobileNativeChatAwaitingInputRow'
-import { scaledType } from './mobile-native-chat-message-styles'
-import { MobileNativeChatMessageTime } from './MobileNativeChatMessageTime'
+import { scaledType } from './native-chat/transcript/mobile-native-chat-message-styles'
+import { MobileNativeChatMessageTime } from './native-chat/transcript/MobileNativeChatMessageTime'
 
 export function MobileNativeChatResolutionReceipt({
   body,

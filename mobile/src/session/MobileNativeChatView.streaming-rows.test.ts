@@ -15,7 +15,7 @@ import { MobileNativeChatOverlay } from './MobileNativeChatOverlay'
 import type * as MobileNativeChatItemReadModule from './mobile-native-chat-item-read'
 import type * as MobileNativeChatRowPropsModule from './use-mobile-native-chat-row-props'
 import type * as MobileNativeChatRowProjectionModule from './mobile-native-chat-row-projection'
-import type * as MobileNativeChatMessageDetailModule from './use-mobile-native-chat-message-detail'
+import type * as MobileNativeChatMessageDetailModule from './native-chat/transcript/use-mobile-native-chat-message-detail'
 import type { MobileNativeChatController } from './mobile-native-chat-controller-contract'
 import { stubRpcClient } from '../transport/rpc-client-test-stub'
 import { MobileNativeChatView } from './MobileNativeChatView'
@@ -84,36 +84,39 @@ vi.mock('./mobile-native-chat-row-projection', async (importOriginal) => {
     }
   }
 })
-vi.mock('./use-mobile-native-chat-message-detail', async (importOriginal) => {
-  const actual = await importOriginal<typeof MobileNativeChatMessageDetailModule>()
-  return {
-    ...actual,
-    useMobileNativeChatMessageDetail(
-      ...args: Parameters<typeof actual.useMobileNativeChatMessageDetail>
-    ) {
-      const result = actual.useMobileNativeChatMessageDetail(...args),
-        detail = result.detail
-      return detail
-        ? {
-            ...result,
-            detail: {
-              ...detail,
-              raw: (id: string) => {
-                operations.raw.push(id)
-                return detail.raw(id)
-              },
-              state: (id: string) => {
-                operations.state.push(id)
-                return detail.state(id)
+vi.mock(
+  './native-chat/transcript/use-mobile-native-chat-message-detail',
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof MobileNativeChatMessageDetailModule>()
+    return {
+      ...actual,
+      useMobileNativeChatMessageDetail(
+        ...args: Parameters<typeof actual.useMobileNativeChatMessageDetail>
+      ) {
+        const result = actual.useMobileNativeChatMessageDetail(...args),
+          detail = result.detail
+        return detail
+          ? {
+              ...result,
+              detail: {
+                ...detail,
+                raw: (id: string) => {
+                  operations.raw.push(id)
+                  return detail.raw(id)
+                },
+                state: (id: string) => {
+                  operations.state.push(id)
+                  return detail.state(id)
+                }
               }
             }
-          }
-        : result
+          : result
+      }
     }
   }
-})
+)
 const rendered = vi.hoisted(() => new Map<string, number>())
-vi.mock('./MobileNativeChatMessage', async () => {
+vi.mock('./native-chat/transcript/MobileNativeChatMessage', async () => {
   const React = await import('react')
   const { useMobileNativeChatFullMessage, MobileNativeChatToolOutput } =
     await import('./MobileNativeChatFullContent')
@@ -178,8 +181,10 @@ vi.mock('./native-chat/input/MobileNativeChatQueuedMessages', () => ({
 vi.mock('./native-chat/input/MobileNativeChatBackgroundTasks', () => ({
   MobileNativeChatBackgroundTasks: 'BackgroundTasks'
 }))
-vi.mock('./MobileNativeChatImageViewer', () => ({ MobileNativeChatImageViewer: 'ImageViewer' }))
-vi.mock('./MobileNativeChatMessageActionsSheet', () => ({
+vi.mock('./native-chat/visual/MobileNativeChatImageViewer', () => ({
+  MobileNativeChatImageViewer: 'ImageViewer'
+}))
+vi.mock('./native-chat/transcript/MobileNativeChatMessageActionsSheet', () => ({
   MobileNativeChatMessageActionsSheet: 'ActionsSheet'
 }))
 vi.mock('./native-chat/composer/MobileNativeChatComposer', () => ({

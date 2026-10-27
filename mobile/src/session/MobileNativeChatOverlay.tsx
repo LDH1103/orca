@@ -7,10 +7,10 @@ import type { MobileNativeChatController } from './use-mobile-native-chat-contro
 import type { MobileNativeChatStructuredComposer } from './native-chat/composer/MobileNativeChatComposer'
 import { useMobileNativeChatStreamingBubble } from './native-chat/use-mobile-native-chat-streaming-bubble'
 import { useMobileNativeChatComposerTray } from './native-chat/composer/use-mobile-native-chat-composer-tray'
-import { useMobileNativeChatVisualRenderer } from './MobileNativeChatVisual'
-import { MobileNativeChatVisualContext } from './mobile-native-chat-visual-context'
+import { useMobileNativeChatVisualRenderer } from './native-chat/visual/MobileNativeChatVisual'
+import { MobileNativeChatVisualContext } from './native-chat/visual/mobile-native-chat-visual-context'
 import { MobileNativeChatRootItemSourceContext } from './mobile-native-chat-item-read'
-import { useMobileNativeChatMessageDetail } from './use-mobile-native-chat-message-detail'
+import { useMobileNativeChatMessageDetail } from './native-chat/transcript/use-mobile-native-chat-message-detail'
 import {
   MobileNativeChatReplyRevealsContext,
   useMobileNativeChatReplyReveals

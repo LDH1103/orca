@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { nativeChatModelPillLabel } from './native-chat-session-option-labels'
-import type { SessionOptionDescriptor } from '../../../../shared/native-chat-session-options'
+import type { SessionOptionDescriptor } from '../../../../shared/native-chat/input/native-chat-session-options'
 
 vi.mock('@/i18n/i18n', () => ({
   translate: vi.fn((_key: string, fallback: string) => fallback)
