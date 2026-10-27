@@ -122,7 +122,13 @@ export async function mapEditField(
     value.kind !== 'unsupported' &&
     getJiraEditFieldSchemaEditor({ schema: field.schema, allowedValues, richText }) !== 'readonly'
   if (writable && richText && site.authType !== 'server' && raw && typeof raw === 'object') {
-    writable = await adfRoundTripsThroughMarkdown(raw)
+    // Why: one failed check must not fail the whole field list; the value stays read-only.
+    try {
+      writable = await adfRoundTripsThroughMarkdown(raw)
+    } catch (error) {
+      console.warn(`[jira] rich-text round-trip check failed for ${fieldKey}:`, error)
+      writable = false
+    }
   }
   return {
     ...field,

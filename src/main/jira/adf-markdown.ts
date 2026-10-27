@@ -203,7 +203,10 @@ function renderCodeBlock(record: JiraAdfRecord, options?: AdfToMarkdownOptions):
   const language = asString(asRecord(record.attrs).language)
   // Keep the language so Markdown edits can write the same code block back.
   const info = /^[\w#+.-]+$/.test(language) ? language : ''
-  return { kind: 'block', text: [`\`\`\`${info}`, text, '```'].join('\n') }
+  // A fence longer than any backtick run in the code keeps a ``` line from closing it.
+  const longestRun = (text.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0)
+  const fence = '`'.repeat(Math.max(3, longestRun + 1))
+  return { kind: 'block', text: [`${fence}${info}`, text, fence].join('\n') }
 }
 
 function renderBlockquote(record: JiraAdfRecord, options?: AdfToMarkdownOptions): MarkdownBlock {

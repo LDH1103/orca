@@ -1,12 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as AdfRoundTripModule from './adf-round-trip'
 import type { JiraClientForSite } from './authenticated-request'
 
-const { clearTokenMock, getClientsMock, isAuthErrorMock, jiraRequestMock } = vi.hoisted(() => ({
-  clearTokenMock: vi.fn(),
-  getClientsMock: vi.fn(),
-  isAuthErrorMock: vi.fn(),
-  jiraRequestMock: vi.fn()
-}))
+const { adfRoundTripMock, clearTokenMock, getClientsMock, isAuthErrorMock, jiraRequestMock } =
+  vi.hoisted(() => ({
+    adfRoundTripMock: vi.fn(),
+    clearTokenMock: vi.fn(),
+    getClientsMock: vi.fn(),
+    isAuthErrorMock: vi.fn(),
+    jiraRequestMock: vi.fn()
+  }))
+
+// Runs the real round-trip check unless a test makes it fail.
+vi.mock('./adf-round-trip', async (importOriginal) => {
+  const actual = await importOriginal<typeof AdfRoundTripModule>()
+  adfRoundTripMock.mockImplementation(actual.adfRoundTripsThroughMarkdown)
+  return { adfRoundTripsThroughMarkdown: (...args: unknown[]) => adfRoundTripMock(...args) }
+})
 
 vi.mock('./request-queue', () => ({
   acquire: vi.fn().mockResolvedValue(undefined),
@@ -210,6 +220,40 @@ describe('getIssueEditFields', () => {
     const [description] = await getIssueEditFields('ENG-1', 'site-1', true)
 
     expect(description).toMatchObject({ key: 'description', richText: true, writable: false })
+  })
+
+  it('keeps the field list when one rich-text check fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      getClientsMock.mockReturnValue([makeEntry()])
+      adfRoundTripMock.mockRejectedValueOnce(new Error('parser failed'))
+      jiraRequestMock
+        .mockResolvedValueOnce({
+          fields: { description: editmeta.fields.description, duedate: editmeta.fields.duedate }
+        })
+        .mockResolvedValueOnce({
+          fields: {
+            description: {
+              type: 'doc',
+              version: 1,
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello' }] }]
+            },
+            duedate: '2026-10-20'
+          }
+        })
+      const { getIssueEditFields } = await import('./jira-issue-edit-fields')
+
+      const fields = await getIssueEditFields('ENG-1', 'site-1', true)
+
+      // The failed field turns read-only instead of rejecting every field.
+      expect(fields.map((field) => [field.key, field.writable])).toEqual([
+        ['description', false],
+        ['duedate', true]
+      ])
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('edits Server/DC wiki text verbatim', async () => {

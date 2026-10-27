@@ -32,6 +32,14 @@ describe('adfRoundTripsThroughMarkdown', () => {
     await expect(adfRoundTripsThroughMarkdown(adf)).resolves.toBe(true)
   })
 
+  it('accepts code whose lines look like closing fences', async () => {
+    const adf = doc(
+      { type: 'codeBlock', attrs: { language: 'md' }, content: [text('```\nstill code\n````')] },
+      paragraph(text('after'))
+    )
+    await expect(adfRoundTripsThroughMarkdown(adf)).resolves.toBe(true)
+  })
+
   it.each([
     ['media', doc({ type: 'mediaSingle', content: [{ type: 'media', attrs: { id: '1' } }] })],
     ['mentions', doc(paragraph({ type: 'mention', attrs: { id: 'a', text: '@Ada' } }))],
