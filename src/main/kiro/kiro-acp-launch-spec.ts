@@ -39,8 +39,7 @@ export const KIRO_LAUNCH_SPEC: AcpLaunchSpec = {
   env: {},
   dialect: KIRO_ACP_DIALECT,
   loginCommand: agentSessionSetupFor('kiro')?.loginCommand ?? [],
-  // V3 reads settings and sessions from KIRO_HOME but its sign-in from the CLI store. It runs no
-  // user hooks here: only clients that opt in at initialize, like the kiro-cli TUI, get them.
+  // V3 reads settings, sessions and hooks from KIRO_HOME but its sign-in from the CLI store.
   account: {
     ...KIRO_HOME_BINDING,
     // Pin the home Kiro falls back to, so sessions never record one it ignores.
